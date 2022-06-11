@@ -5,8 +5,8 @@ import unittest
 
 class MapCanvas(tkinter.Canvas):
     def __init__(self, *args, **kwargs):
-        kwargs.setdefault('bg', black)
-        super()._init_(*args, **kwargs)
+        kwargs.setdefault('bg', 'black')
+        super().__init__(*args, **kwargs)
 
 class _ut_MapCanvas(unittest.TestCase):
     def test_mapcanvas(self):
@@ -18,4 +18,6 @@ class _ut_MapCanvas(unittest.TestCase):
         
         try:
             root.quit()
+        except:
+            pass
 
