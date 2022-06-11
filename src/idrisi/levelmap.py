@@ -1,0 +1,502 @@
+## The basic Delaunay mapping class
+## This will get subclassed all sorts of ways to make up the full mapping package
+
+import delmap
+import jrandom
+import jutil
+import os
+import PIL.Image
+import subprocess
+import unittest
+
+class LevelMapper(delmap.DelMapper):
+    _forbiddenColor = (0xA4, 0x00, 0x74)
+    _errorColor     = (0xD7, 0xAD, 0xFF)
+    _uninitColor    = (0x00, 0x00, 0x46)
+    _seaColor       = (0x01, 0x5E, 0x89)
+    _riverColor     = (0x03, 0xDB, 0xFF)
+    _landColorSeq   = ( (0x00, 0xFF, 0xCF),
+                        (0x00, 0x42, 0x00),
+                        (0x00, 0x9E, 0x00),
+                        (0xD0, 0xEF, 0x8C),
+                        (0xFF, 0xFF, 0x00),
+                        (0xAE, 0x79, 0x00),
+                        (0xFF, 0x03, 0x00),
+                        (0x66, 0x00, 0x00),
+                        (0xFF, 0x8F, 0x91),
+                        (0xFF, 0xFF, 0xFA) )
+    
+    def __init__(self, pointSeq):
+        super().__init__(pointSeq)
+
+        ## The levelization for each location by pId.  Levels are:
+        ##   None : Point belongs to the sea floor        
+        ##   <= 0 : Point belongs to a river.  Zero represents a river source,
+        ##          and decrements for each step away from the source.  When
+        ##          rivers join, the minimum value (maximal negative distance
+        ##          from source) is kept at the joining node.
+        ##    > 0 : Point belongs to land.  Value represents the number of
+        ##          steps required to reach a river or sea node.
+        ## Missing points have not yet been levelized
+        self._level = dict()
+        
+        ## A set of forbidden edges.  These edges are not allowed in the slope
+        ## graph.  Typically these are used to keep the algorithms from
+        ## utilizing the long outer edges when constructing rivers or mountain
+        ## slopes.
+        self._forbiddenEdges = set()
+
+    def is_edge_forbidden(self, aPID, bPID):
+        return(((aPID, bPID) if aPID < bPID else (bPID, aPID)) in self._forbiddenEdges)
+               
+    def forbid_edge(self, aPID, bPID):
+        if(aPID < bPID):
+            self._forbiddenEdges.add((aPID, bPID))
+        else:
+            self._forbiddenEdges.add((bPID, aPID))
+
+    def forbid_long_edges(self, limit):
+        ## If edge is longer than limit, forbid it!
+        limitsq = limit * limit
+        for aPID, aPoint in self.enumerate_points():
+            for bPID in self.adjacent_nodes(aPID):
+                if(bPID < aPID):
+                    continue
+                bPoint = self.point(bPID)
+
+                xdel = aPoint[0] - bPoint[0]
+                ydel = aPoint[1] - bPoint[1]
+                norm = xdel * xdel + ydel * ydel
+                if(norm > limitsq):
+                    self.forbid_edge(aPID, bPID)
+        
+    def isolated_nodes(self):
+        ## Yield any nodes which are isolated -- all its adjacent edges are
+        ## forbidden!
+        for aPID, aPoint in self.enumerate_points():
+            if all(self.is_edge_forbidden(aPID, bPID) for bPID in self.adjacent_nodes(aPID)):
+                yield aPID
+
+    def set_hull_sea(self):
+        for aPID, bPID in self.convex_hull_edges():
+            self._level[aPID] = None
+            self._level[bPID] = None
+        for sID, simplex in self.enumerate_simplices():
+            pID, qID, rID = simplex
+            if(self.is_edge_forbidden(pID, qID) or
+               self.is_edge_forbidden(qID, rID) or
+               self.is_edge_forbidden(rID, pID)):
+                self._level[pID] = None
+                self._level[qID] = None
+                self._level[rID] = None
+        
+    def set_functional_sea(self, *select_fn_list):
+        ## This is named backward.  The functions in the list should return
+        ## true if the point is part of a land or river area.  A point is
+        ## marked as sea if all of the functions applied to it return false
+        for pID, point in self.enumerate_points():
+            if not any(inside(point) for inside in select_fn_list):
+                self._level[pID] = None
+
+    def set_simplex_sea(self, pointSeq):
+        ## Given a sequence of points (x, y), find the simplex containing each
+        ## point and mark it as sea
+        for point in pointSeq:
+            sID = self.containing_simplex(point)
+            if(sID != -1):
+                for pID in self.simplex(sID):
+                    self._level[pID] = None
+
+    def set_fill_sea(self, pID):
+        ## Given a point, fill it and its unset neighbors (recursively) as sea
+        stuffToFill = {pID}
+        while(stuffToFill):
+            pID = stuffToFill.pop()
+            if pID not in self._level:
+                self._level[pID] = None
+                stuffToFill.update(self.neighbors(pID))
+    
+
+    def neighbors(self, pID):
+        ## Yield the adjacent nodes whose edges are not forbidden
+        yield from (qID for qID in self.adjacent_nodes(pID) if not self.is_edge_forbidden(pID, qID))
+
+    def is_lower(self, pLevel, qLevel, *, ignoreSea=False):
+        ## Returns true if qLevel is lower than pLevel
+        return(pLevel is not None and
+               ((not ignoreSea and qLevel is None) or
+                (qLevel is not None and qLevel < pLevel)));
+
+    def max_level(self):
+        ## Returns False if no level has been set,
+        ##         None if only sea levels have been set, or
+        ##         the max level value found
+        ml = False
+
+        for pID, level in self._level.items():
+            if (ml is False or ml is None or (level is not None and level > ml)):
+                ml = level
+
+        return ml
+        
+    def is_valid_level(self, pID, *, ignoreSea=False):
+        ## Check a point and return True if the level value for this point
+        ## exists and obeys all rules, False otherwise
+
+        ## Empty level is not valid
+        if pID not in self._level:
+            return(False)
+
+        pLevel = self._level[pID]
+        
+        ## Sea level is always valid
+        if(pLevel is None):
+            return(True)
+
+        ## Shore must border a sea or river
+        ## Rivers must have an outflow
+        if(pLevel <= 1):            
+            return(any(self.is_lower(pLevel, self._level[qID],
+                                     ignoreSea=ignoreSea if pLevel == 1 else False)
+                       for qID in self.neighbors(pID) if qID in self._level))
+        
+        ## Non-shore land must be a level one higher than its lowest neighbor
+        hasOneLNeighbor = False
+        for qID in self.neighbors(pID):
+            if qID in self._level:
+                qLevel = self._level[qID]
+                if ignoreSea and qLevel is None:
+                    continue
+                if qLevel is None or qLevel < pLevel - 1:
+                    return(False)
+                if qLevel == pLevel - 1:
+                    hasOneLNeighbor = True
+                    
+        return(hasOneLNeighbor)
+        
+    def levelize(self, *, ignoreSea=False):
+        invalids = set()
+        for pID, pPoint in self.enumerate_points():
+            if self.is_valid_level(pID, ignoreSea=ignoreSea):
+                for qID in self.neighbors(pID):
+                    if not self.is_valid_level(qID, ignoreSea=ignoreSea):
+                        invalids.add(qID)
+
+        while(invalids):            
+            nextInvalids = set()
+            
+            for pID in invalids:                
+                pLevel = None
+                for qID in self.neighbors(pID):
+                    if qID in self._level:
+                        qLevel = self._level[qID]
+                        if ignoreSea and qLevel is None:
+                            continue
+                        if qLevel is None or qLevel < 1:
+                            pLevel = 1
+                            break
+                        elif pLevel is None or qLevel < pLevel:
+                            pLevel = qLevel + 1
+                if(pLevel is None):
+                    nextInvalids.add(pID)
+                else:
+                    self._level[pID] = pLevel
+                    for qID in self.neighbors(pID):
+                        if(not self.is_valid_level(qID, ignoreSea=ignoreSea)):
+                            nextInvalids.add(qID)
+            invalids = nextInvalids
+        
+    def add_river_source(self, pID):
+        pLevel = self._level.get(pID)
+        river = list()
+        while(pLevel is not None and pLevel > -len(river)):
+            river.append(pID)
+            for qID in self.neighbors(pID):
+                qLevel = self._level.get(qID)
+                if qLevel is None:
+                    pID = qID
+                    pLevel = None
+                    break
+                if qLevel < pLevel:
+                    pLevel = qLevel
+                    pID = qID
+
+        for negLevel, pID in enumerate(river):
+            self._level[pID] = -negLevel
+
+    def remove_river_stubs(self, minLength):
+        ## Look for forks, mark for deletion
+        toDelete = set()
+        for pID, pLevel in self._level.items():
+            if pLevel is not None and pLevel < 0:
+                longInBranches = list()
+                shortInBranches = list()
+                
+                for qID in self.neighbors(pID):
+                    qLevel = self._level.get(qID)
+                    if qLevel is not None and pLevel < qLevel < 1:
+                        if -qLevel < minLength:
+                            shortInBranches.append(qID)
+                        else:
+                            longInBranches.append(qID)
+                if(longInBranches):
+                    toDelete.update(shortInBranches)
+                else:
+                    toDelete.update(shortInBranches[1:])
+
+        # Delete
+        while(toDelete):
+            pID = toDelete.pop()
+            pLevel = self._level[pID]
+            del self._level[pID]
+            for qID in self.neighbors(pID):
+                qLevel = self._level.get(qID)
+                if(qLevel is not None and pLevel < qLevel < 1):
+                    toDelete.add(qID)
+
+    def level_color(self, pID, *, maxLevel=1):
+        if(pID not in self._level):
+            return LevelMapper._uninitColor
+        
+        level = self._level[pID]
+
+        if(level is None):
+            return LevelMapper._seaColor
+
+        if(level <= 0):
+            return LevelMapper._riverColor
+
+        if(maxLevel <= len(LevelMapper._landColorSeq)):
+            clu = level - 1
+            if clu < 0:
+                return(LevelMapper._landColorSeq[0])
+            elif clu < len(LevelMapper._landColorSeq):
+                return(LevelMapper._landColorSeq[clu])
+            else:
+                return LevelMapper._landColorSeq[-1]
+
+        else:
+            clu = (level-1)*(len(LevelMapper._landColorSeq)-1)/(maxLevel - 1)
+            cfidx, wc = divmod(clu, 1)
+            cfidx = int(cfidx)
+            wf = 1 - wc
+            ccidx = cfidx + 1
+            if(ccidx == len(LevelMapper._landColorSeq)):
+                ccidx = cfidx
+
+            return tuple(a * wf + b * wc for a,b in zip(LevelMapper._landColorSeq[cfidx],
+                                                        LevelMapper._landColorSeq[ccidx]))
+                
+class _ut_LevelMapper(unittest.TestCase):
+    def quickview(self, view):
+        view.save("unittest.png")
+        proc = subprocess.Popen(("display", "unittest.png"))
+        proc.wait();
+        os.remove("unittest.png")
+    
+    def test_forbidden_edges(self):        
+        jr = jrandom.JRandom()
+        vp = jutil.Viewport(gridSize = (1024, 768),
+                            viewSize = (1024, 768),
+                            gridExpand = 0.9)
+        separate = 11
+        points = list(jr.punctillate_rect(pMin = vp.overGridMin(),
+                                          pMax = vp.overGridMax(),
+                                          distsq = separate * separate))
+        lmap = LevelMapper(points)
+        lmap.forbid_long_edges(5 * separate)
+        self.assertTupleEqual(tuple(lmap.isolated_nodes()), ())
+
+        def color_edge(pID, qID):
+            self.assertEqual(lmap.is_edge_forbidden(pID, qID), lmap.is_edge_forbidden(qID, pID))
+            if lmap.is_edge_forbidden(pID, qID):
+                return LevelMapper._forbiddenColor
+            else:
+                return LevelMapper._uninitColor
+        
+        view = PIL.Image.new('RGB', vp.viewSize())
+        lmap.draw_edges(view, grid2view_fn=vp.grid2view,
+                        edge_color_fn = lambda pID, qID: (color_edge(pID, qID), color_edge(qID, pID)))
+        self.quickview(view)
+
+
+    def test_functional_sea(self):        
+        jr = jrandom.JRandom()
+        vp = jutil.Viewport(gridSize = (1024, 768),
+                            viewSize = (1024, 768),
+                            gridExpand = 0.9)
+        separate = 11
+        points = list(jr.punctillate_rect(pMin = vp.overGridMin(),
+                                          pMax = vp.overGridMax(),
+                                          distsq = separate * separate))
+        lmap = LevelMapper(points)
+        lmap.forbid_long_edges(5 * separate)
+
+        gCenter = (vp.gridSize()[0] / 2.0, vp.gridSize()[1] / 2.0)
+        maxrad = min(vp.overGridMax()[0] - vp.overGridMin()[0],
+                     vp.overGridMax()[1] - vp.overGridMin()[1]) / 2.0
+        minrad = maxrad / 1.5
+        base, evenAmplSeq, oddAmplSeq = jr.tonal_rand(minrad, maxrad, 11)
+
+        rfun = jutil.in_radial_fn(gCenter, base, evenAmplSeq, oddAmplSeq)
+
+        lmap.set_functional_sea(rfun)
+                
+        view = PIL.Image.new('RGB', vp.viewSize())
+        lmap.draw_edges(view, grid2view_fn=vp.grid2view,
+                        edge_color_fn = lambda pID, qID: (lmap.level_color(pID),
+                                                          lmap.level_color(qID)))
+        self.quickview(view)
+
+    def test_simplex_sea(self):        
+        jr = jrandom.JRandom()
+        vp = jutil.Viewport(gridSize = (1024, 768),
+                            viewSize = (1024, 768),
+                            gridExpand = 0.9)
+        separate = 7
+        points = list(jr.punctillate_rect(pMin = vp.overGridMin(),
+                                          pMax = vp.overGridMax(),
+                                          distsq = separate * separate))
+        lmap = LevelMapper(points)
+        lmap.forbid_long_edges(5 * separate)
+
+        mid = tuple((a + b) / 2 for a,b in zip(vp.overGridMin(), vp.overGridMax()))
+        
+        pFrom = (jr.uniform(vp.overGridMin()[0], mid[0]),
+                 jr.uniform(vp.overGridMin()[1], mid[1]))
+        pTo   = (jr.uniform(mid[0], vp.overGridMax()[0]),
+                 jr.uniform(mid[1], vp.overGridMax()[1]))
+
+        kp = list(jr.koch2_path(pFrom, pTo, separate * separate / 100.0, fixedR=None, leanLeft=False)) # , 0.2))
+        kp.append(pTo)
+        
+        lmap.set_simplex_sea(kp)
+            
+        view = PIL.Image.new('RGB', vp.viewSize())
+        lmap.draw_edges(view, grid2view_fn=vp.grid2view,
+                        edge_color_fn = lambda pID, qID: (lmap.level_color(pID),
+                                                          lmap.level_color(qID)))
+        for kPoint in kp:
+            kXY = tuple(int(p) for p in vp.grid2view(kPoint))
+            view.putpixel(kXY, LevelMapper._errorColor)
+        
+        self.quickview(view)
+
+    def test_fill_sea(self):        
+        jr = jrandom.JRandom()
+        vp = jutil.Viewport(gridSize = (1920, 1080),
+                            viewSize = (1920, 1080),
+                            gridExpand = 0.95)
+        separate = 7
+        points = list(jr.punctillate_rect(pMin = vp.overGridMin(),
+                                          pMax = vp.overGridMax(),
+                                          distsq = separate * separate))
+        lmap = LevelMapper(points)
+        lmap.forbid_long_edges(5 * separate)
+
+        anchorweights = ((0.1, 0.1), (0.1, 0.5), (0.5, 0.5), (0.5, 0.9), (0.9, 0.9), (0.9, 0.3), (0.4, 0.3), (0.1, 0.1))
+        anchorpoints = tuple((vp.overGridMin()[0] * a + vp.overGridMax()[0] * (1-a),
+                              vp.overGridMin()[1] * b + vp.overGridMax()[1] * (1-b)) for a,b in anchorweights)
+
+        anchorleans = (True, None, None, True, None, None, True)
+
+        kp = list()
+        for p0, p1, lean in zip(anchorpoints, anchorpoints[1:], anchorleans):
+            kp.extend(jr.koch2_path(p0, p1, separate * separate / 100.0, fixedR=1/4, leanLeft=lean))
+
+        lmap.set_simplex_sea(kp)
+        for pID, qID in lmap.convex_hull_edges():
+            lmap.set_fill_sea(pID)
+
+        lmap.levelize()
+        ml = lmap.max_level()
+        if ml is None or ml is False:
+            ml = 0
+            
+        view = PIL.Image.new('RGB', vp.viewSize())
+        lmap.draw_edges(view, grid2view_fn=vp.grid2view,
+                        edge_color_fn = lambda pID, qID: (lmap.level_color(pID, maxLevel=ml),
+                                                          lmap.level_color(qID, maxLevel=ml)))
+        for kPoint in kp:
+            kXY = tuple(int(p) for p in vp.grid2view(kPoint))
+            if(0 <= kXY[0] < vp.gridSize()[0] and 0 <= kXY[1] < vp.gridSize()[1]):
+                #view.putpixel(kXY, LevelMapper._errorColor)
+                pass
+        
+        self.quickview(view)
+
+    def test_levelize(self):        
+        jr = jrandom.JRandom()
+        vp = jutil.Viewport(gridSize = (1024, 768),
+                            viewSize = (1024, 768),
+                            gridExpand = 0.9)
+        separate = 15
+        points = list(jr.punctillate_rect(pMin = vp.overGridMin(),
+                                          pMax = vp.overGridMax(),
+                                          distsq = separate * separate))
+        lmap = LevelMapper(points)
+        lmap.forbid_long_edges(5 * separate)
+
+        lmap.set_hull_sea()
+        lmap.levelize()
+
+        for turn in (7,):
+            nines = list(pID for pID in lmap._level if lmap._level[pID] == turn)
+            while(nines):
+                lmap.add_river_source(jr.choice(nines))
+                lmap.levelize()
+                nines = list(pID for pID in lmap._level if lmap._level[pID] == turn)
+
+        lmap.remove_river_stubs(12)
+
+        for ignoreSea in (False, True, False):
+            lmap.levelize(ignoreSea=ignoreSea)
+
+            ml = lmap.max_level()
+            if ml is None or ml is False:
+                ml = 0
+
+            view = PIL.Image.new('RGB', vp.viewSize())
+            lmap.draw_edges(view, grid2view_fn=vp.grid2view,
+                            edge_color_fn = lambda pID, qID: (lmap.level_color(pID, maxLevel=ml),
+                                                              lmap.level_color(qID, maxLevel=ml)))
+            self.quickview(view)
+
+    
+    
+    def test_alternate_start(self):
+        jr = jrandom.JRandom()
+        vp = jutil.Viewport(gridSize = (1024, 768),
+                            viewSize = (1024, 768),
+                            gridExpand = 0.9)
+        separate = 15
+        
+        gCenter = (vp.gridSize()[0] / 2.0, vp.gridSize()[1] / 2.0)
+        maxrad = min(vp.overGridMax()[0] - vp.overGridMin()[0],
+                     vp.overGridMax()[1] - vp.overGridMin()[1]) / 2.0
+        minrad = maxrad / 1.5
+        base, evenAmplSeq, oddAmplSeq = jr.tonal_rand(minrad, maxrad, 11)
+
+        rfilter = jutil.in_radial_fn(gCenter, base, evenAmplSeq, oddAmplSeq)
+        
+        points = list(point for point in
+                      jr.punctillate_rect(pMin = vp.overGridMin(),
+                                          pMax = vp.overGridMax(),
+                                          distsq = separate * separate)
+                      if rfilter(point))
+        
+        lmap = LevelMapper(points)
+        lmap.forbid_long_edges(5 * separate)
+
+        lmap.set_hull_sea()
+        lmap.levelize()
+
+        ml = lmap.max_level()
+        if ml is None or ml is False:
+            ml = 0
+        
+        view = PIL.Image.new('RGB', vp.viewSize())
+        lmap.draw_edges(view, grid2view_fn=vp.grid2view,
+                        edge_color_fn = lambda pID, qID: (lmap.level_color(pID, maxLevel=ml),
+                                                          lmap.level_color(qID, maxLevel=ml)))
+        self.quickview(view)
