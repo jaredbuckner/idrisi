@@ -1,9 +1,9 @@
 ## This builds on the levelmap to make a heightmap
 
 import math
-import jrandom
-import jutil
-import levelmap
+import idrisi.jrandom as jrandom
+import idrisi.jutil as jutil
+import idrisi.levelmap as levelmap
 import os
 import PIL.Image
 import subprocess

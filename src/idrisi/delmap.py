@@ -1,7 +1,7 @@
 ## The basic Delaunay mapping class
 ## This will get subclassed all sorts of ways to make up the full mapping package
 
-import jutil
+import idrisi.jutil as jutil
 import os
 import PIL.Image
 from scipy.spatial import Delaunay
@@ -142,7 +142,7 @@ class _ut_DelMapper(unittest.TestCase):
                   overwidth = 1.5,
                   overheight = 1.5,
                   separate = 10):
-        import jrandom
+        import idrisi.jrandom as jrandom
         
         jr = jrandom.JRandom();
         vp = jutil.Viewport(gridSize = (1024, 768),
@@ -199,7 +199,7 @@ class _ut_DelMapper(unittest.TestCase):
         self.quickview(view)
 
     def test_adjacent_nodes(self):
-        import jrandom
+        import idrisi.jrandom as jrandom
         
         jr = jrandom.JRandom();
         vp = jutil.Viewport(gridSize = (100, 100),

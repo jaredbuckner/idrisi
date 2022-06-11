@@ -1,9 +1,9 @@
 ## The basic Delaunay mapping class
 ## This will get subclassed all sorts of ways to make up the full mapping package
 
-import delmap
-import jrandom
-import jutil
+import idrisi.delmap as delmap
+import idrisi.jrandom as jrandom
+import idrisi.jutil as jutil
 import os
 import PIL.Image
 import subprocess
