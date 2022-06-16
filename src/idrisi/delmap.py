@@ -1,12 +1,15 @@
 ## The basic Delaunay mapping class
 ## This will get subclassed all sorts of ways to make up the full mapping package
 
+from scipy.spatial import Delaunay
+import unittest
+
+## I only need these for unit testing, but how to import conditionally?
+import idrisi.jrandom as jrandom
 import idrisi.jutil as jutil
 import os
 import PIL.Image
-from scipy.spatial import Delaunay
 import subprocess
-import unittest
 
 class DelMapper:
     def __init__(self, pointSeq):
@@ -130,53 +133,43 @@ class DelMapper:
                 
 
 class _ut_DelMapper(unittest.TestCase):
+    def setUp(self):
+        self.jr = jrandom.JRandom();
+        self.vp = jutil.Viewport(gridSize = (1024, 768),
+                                 viewSize = (1024, 768))
+        self.separate = 10
+        
     def quickview(self, view):
         view.save("unittest.png");
         proc = subprocess.Popen(("display", "unittest.png"))
         proc.wait();
         os.remove("unittest.png");
 
-    def quickgrid(self, *,
-                  width = 1024,
-                  height = 768,
-                  overwidth = 1.5,
-                  overheight = 1.5,
-                  separate = 10):
-        import idrisi.jrandom as jrandom
-        
-        jr = jrandom.JRandom();
-        vp = jutil.Viewport(gridSize = (1024, 768),
-                            viewSize = (1024, 768),
-                            gridExpand = 0.75)
-        points = list(jr.punctillate_rect(pMin = vp.overGridMin(),
-                                          pMax = vp.overGridMax(),
-                                             distsq = separate * separate))
+    def quickgrid(self):
+        points = list(self.jr.punctillate_rect(pMin = self.vp.grid_sel_min(),
+                                               pMax = self.vp.grid_sel_max(),
+                                               distsq = self.separate * self.separate))
         return DelMapper(points)
         
     def test_random_nodes(self):
-        width = 1024
-        height = 768
-        
-        dmap = self.quickgrid(width=width, height=height)
-        view = PIL.Image.new('RGB', (width, height));
-        dmap.draw_nodes(view, grid2view_fn=lambda xy: xy, node_color_fn=lambda nID: (255,255,255))
+        self.vp.zoom_grid_sel(1.1);
+        dmap = self.quickgrid();
+        self.vp.reset_grid_sel();
+        view = PIL.Image.new('RGB', self.vp.view_size());
+        dmap.draw_nodes(view, grid2view_fn=self.vp.grid2view, node_color_fn=lambda nID: (255,255,255))
         self.quickview(view)
 
     def test_random_edges(self):
-        width = 1024
-        height = 768
-        
-        dmap = self.quickgrid(width=width, height=height)
-        view = PIL.Image.new('RGB', (width, height));
+        dmap = self.quickgrid();
+        self.vp.zoom_grid_sel(0.9);
+        view = PIL.Image.new('RGB', self.vp.view_size());
         dmap.draw_edges(view,
-                        grid2view_fn=lambda xy: xy,
+                        grid2view_fn=self.vp.grid2view,
                         edge_color_fn=lambda pID, qID: ((255,255,255),
                                                         (255,255,255)))
         self.quickview(view)
         
     def test_random_simplexes(self):
-        width = 1024
-        height = 768
         colors = ( (255, 0, 0),
                    (0, 255, 0),
                    (0, 0, 255) )
@@ -185,31 +178,25 @@ class _ut_DelMapper(unittest.TestCase):
                     (255, 0 ,255),
                     (255, 255, 0) )
 
-        dmap = self.quickgrid(width=width, height=height, separate=100)
-        view = PIL.Image.new('RGB', (width, height));
+        self.separate = 100
+        dmap = self.quickgrid();
+        view = PIL.Image.new('RGB', self.vp.view_size());
         dmap.draw_simplices(view,
-                            view2grid_fn=lambda xy: xy,
+                            view2grid_fn=self.vp.view2grid,
                             simplex_color_fn=lambda pID, qID, rID: (colors[pID%3],
                                                                     colors[qID%3],
                                                                     colors[rID%3]))
         dmap.draw_edges(view,
-                        grid2view_fn=lambda xy: xy,
+                        grid2view_fn=self.vp.view2grid,
                         edge_color_fn=lambda pID, qID: (eColors[pID%3], eColors[qID%3]))
         
         self.quickview(view)
 
     def test_adjacent_nodes(self):
-        import idrisi.jrandom as jrandom
-        
-        jr = jrandom.JRandom();
-        vp = jutil.Viewport(gridSize = (100, 100),
-                            viewSize = (1024, 1024),
-                            gridExpand = 0.90)
-        separate = 5
-        points = list(jr.punctillate_rect(pMin = vp.overGridMin(),
-                                          pMax = vp.overGridMax(),
-                                          distsq = separate * separate))
-        dmap = DelMapper(points)
+        self.vp.zoom_grid_sel(1.1);
+        self.separate = 50
+        dmap = self.quickgrid();
+        self.vp.reset_grid_sel()
 
         rootID = 0
         adjacents = set(dmap.adjacent_nodes(rootID))
@@ -219,9 +206,9 @@ class _ut_DelMapper(unittest.TestCase):
                     (128, 255, 128) if pID in adjacents else
                     (64, 64, 64))
 
-        view = PIL.Image.new('RGB', vp.viewSize())
+        view = PIL.Image.new('RGB', self.vp.view_size())
         dmap.draw_edges(view,
-                        grid2view_fn=vp.grid2view,
+                        grid2view_fn=self.vp.grid2view,
                         edge_color_fn = lambda pID, qID: (colorNode(pID), colorNode(qID)))
         
         self.quickview(view)

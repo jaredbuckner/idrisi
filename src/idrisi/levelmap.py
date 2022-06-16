@@ -174,7 +174,7 @@ class LevelMapper(delmap.DelMapper):
                     
         return(hasOneLNeighbor)
         
-    def levelize(self, *, ignoreSea=False):
+    def levelize(self, *, ignoreSea=False, maxIterations=None):
         invalids = set()
         for pID, pPoint in self.enumerate_points():
             if self.is_valid_level(pID, ignoreSea=ignoreSea):
@@ -182,10 +182,24 @@ class LevelMapper(delmap.DelMapper):
                     if not self.is_valid_level(qID, ignoreSea=ignoreSea):
                         invalids.add(qID)
 
-        while(invalids):            
+        iteration=0
+        while(invalids and (maxIterations is None or iteration < maxIterations)):
+            iteration += 1
+
+            if(maxIterations is not None and iteration >= maxIterations):
+                while(invalids):
+                    pID = invalids.pop()
+                    if pID in self._level:
+                        del self._level[pID]
+                    for qID in self.neighbors(pID):
+                        if(qID in self._level and
+                           not self.is_valid_level(qID, ignoreSea=ignoreSea)):
+                            invalids.add(qID)
+                break
+                
             nextInvalids = set()
             
-            for pID in invalids:                
+            for pID in invalids:
                 pLevel = None
                 for qID in self.neighbors(pID):
                     if qID in self._level:
@@ -288,121 +302,119 @@ class LevelMapper(delmap.DelMapper):
                                                         LevelMapper._landColorSeq[ccidx]))
                 
 class _ut_LevelMapper(unittest.TestCase):
+    def setUp(self):
+        self.jr = jrandom.JRandom();
+        self.vp = jutil.Viewport(gridSize = (1024, 768),
+                                 viewSize = (1024, 768))
+        self.separate = 11
+        
     def quickview(self, view):
-        view.save("unittest.png")
+        view.save("unittest.png");
         proc = subprocess.Popen(("display", "unittest.png"))
         proc.wait();
-        os.remove("unittest.png")
-    
-    def test_forbidden_edges(self):        
-        jr = jrandom.JRandom()
-        vp = jutil.Viewport(gridSize = (1024, 768),
-                            viewSize = (1024, 768),
-                            gridExpand = 0.9)
-        separate = 11
-        points = list(jr.punctillate_rect(pMin = vp.overGridMin(),
-                                          pMax = vp.overGridMax(),
-                                          distsq = separate * separate))
-        lmap = LevelMapper(points)
-        lmap.forbid_long_edges(5 * separate)
-        self.assertTupleEqual(tuple(lmap.isolated_nodes()), ())
+        os.remove("unittest.png");
 
+    def quickgrid(self, *, filter=None):
+        points = list(p for p in self.jr.punctillate_rect(pMin = self.vp.grid_sel_min(),
+                                                          pMax = self.vp.grid_sel_max(),
+                                                          distsq = self.separate * self.separate)
+                      if filter is None or filter(p))
+        lmap = LevelMapper(points)
+        lmap.forbid_long_edges(5 * self.separate)
+        self.assertTupleEqual(tuple(lmap.isolated_nodes()), ())
+        
+        return lmap
+        
+    def test_forbidden_edges(self):
+        self.vp.zoom_grid_sel(1.1)
+        lmap = self.quickgrid()
+        self.vp.reset_grid_sel()
+        
         def color_edge(pID, qID):
             self.assertEqual(lmap.is_edge_forbidden(pID, qID), lmap.is_edge_forbidden(qID, pID))
             if lmap.is_edge_forbidden(pID, qID):
                 return LevelMapper._forbiddenColor
             else:
                 return LevelMapper._uninitColor
-        
-        view = PIL.Image.new('RGB', vp.viewSize())
-        lmap.draw_edges(view, grid2view_fn=vp.grid2view,
+
+        self.vp.set_view_size((1920,1080))
+        self.vp.reaspect_grid_sel()
+        view = PIL.Image.new('RGB', self.vp.view_size())
+        lmap.draw_edges(view, grid2view_fn=self.vp.grid2view,
                         edge_color_fn = lambda pID, qID: (color_edge(pID, qID), color_edge(qID, pID)))
         self.quickview(view)
 
 
-    def test_functional_sea(self):        
-        jr = jrandom.JRandom()
-        vp = jutil.Viewport(gridSize = (1024, 768),
-                            viewSize = (1024, 768),
-                            gridExpand = 0.9)
-        separate = 11
-        points = list(jr.punctillate_rect(pMin = vp.overGridMin(),
-                                          pMax = vp.overGridMax(),
-                                          distsq = separate * separate))
-        lmap = LevelMapper(points)
-        lmap.forbid_long_edges(5 * separate)
+    def test_functional_sea(self):
+        self.vp.zoom_grid_sel(1.1)
+        lmap = self.quickgrid()
 
-        gCenter = (vp.gridSize()[0] / 2.0, vp.gridSize()[1] / 2.0)
-        maxrad = min(vp.overGridMax()[0] - vp.overGridMin()[0],
-                     vp.overGridMax()[1] - vp.overGridMin()[1]) / 2.0
+        gCenter = self.vp.weights2grid_sel(0.5, 0, 0, 0.5)
+        gHSpan = self.vp.weights2grid_sel(-0.5, 0, 0, 0.5)
+        self.vp.reset_grid_sel()
+        
+        maxrad = min(gHSpan[0], gHSpan[1])
         minrad = maxrad / 1.5
-        base, evenAmplSeq, oddAmplSeq = jr.tonal_rand(minrad, maxrad, 11)
+        base, evenAmplSeq, oddAmplSeq = self.jr.tonal_rand(minrad, maxrad, 11)
 
         rfun = jutil.in_radial_fn(gCenter, base, evenAmplSeq, oddAmplSeq)
 
         lmap.set_functional_sea(rfun)
-                
-        view = PIL.Image.new('RGB', vp.viewSize())
-        lmap.draw_edges(view, grid2view_fn=vp.grid2view,
+
+        self.vp.set_view_size((1920,1080))
+        self.vp.reaspect_grid_sel()
+        view = PIL.Image.new('RGB', self.vp.view_size())
+        lmap.draw_edges(view, grid2view_fn=self.vp.grid2view,
                         edge_color_fn = lambda pID, qID: (lmap.level_color(pID),
                                                           lmap.level_color(qID)))
         self.quickview(view)
 
-    def test_simplex_sea(self):        
-        jr = jrandom.JRandom()
-        vp = jutil.Viewport(gridSize = (1024, 768),
-                            viewSize = (1024, 768),
-                            gridExpand = 0.9)
-        separate = 7
-        points = list(jr.punctillate_rect(pMin = vp.overGridMin(),
-                                          pMax = vp.overGridMax(),
-                                          distsq = separate * separate))
-        lmap = LevelMapper(points)
-        lmap.forbid_long_edges(5 * separate)
+    def test_simplex_sea(self):
+        self.vp.zoom_grid_sel(1.1)
+        self.separate = 7
+        lmap = self.quickgrid()
 
-        mid = tuple((a + b) / 2 for a,b in zip(vp.overGridMin(), vp.overGridMax()))
+        pFrom = self.vp.weights2grid_sel(0.5, *self.jr.rand_sum_to_n(0.5, 3))
+        pTo = self.vp.weights2grid_sel(*self.jr.rand_sum_to_n(0.5, 3), 0.5)
+        self.vp.reset_grid_sel()
         
-        pFrom = (jr.uniform(vp.overGridMin()[0], mid[0]),
-                 jr.uniform(vp.overGridMin()[1], mid[1]))
-        pTo   = (jr.uniform(mid[0], vp.overGridMax()[0]),
-                 jr.uniform(mid[1], vp.overGridMax()[1]))
-
-        kp = list(jr.koch2_path(pFrom, pTo, separate * separate / 100.0, fixedR=None, leanLeft=False)) # , 0.2))
+        kp = list(self.jr.koch2_path(pFrom, pTo, self.separate * self.separate / 100.0, fixedR=None, leanLeft=False))
         kp.append(pTo)
         
         lmap.set_simplex_sea(kp)
-            
-        view = PIL.Image.new('RGB', vp.viewSize())
-        lmap.draw_edges(view, grid2view_fn=vp.grid2view,
+
+        self.vp.set_view_size((1600,1200))
+        self.vp.reaspect_grid_sel()
+        view = PIL.Image.new('RGB', self.vp.view_size())
+        lmap.draw_edges(view, grid2view_fn=self.vp.grid2view,
                         edge_color_fn = lambda pID, qID: (lmap.level_color(pID),
                                                           lmap.level_color(qID)))
         for kPoint in kp:
-            kXY = tuple(int(p) for p in vp.grid2view(kPoint))
+            kXY = tuple(int(p) for p in self.vp.grid2view(kPoint))
             view.putpixel(kXY, LevelMapper._errorColor)
         
         self.quickview(view)
 
-    def test_fill_sea(self):        
-        jr = jrandom.JRandom()
-        vp = jutil.Viewport(gridSize = (1920, 1080),
-                            viewSize = (1920, 1080),
-                            gridExpand = 0.95)
-        separate = 7
-        points = list(jr.punctillate_rect(pMin = vp.overGridMin(),
-                                          pMax = vp.overGridMax(),
-                                          distsq = separate * separate))
-        lmap = LevelMapper(points)
-        lmap.forbid_long_edges(5 * separate)
+    def test_fill_sea(self):
+        self.vp = jutil.Viewport(gridSize = (1920, 1080),
+                                 viewSize = (1920, 1080))
+        self.vp.zoom_grid_sel(1.1)
+        self.separate = 7
+        lmap = self.quickgrid()
 
         anchorweights = ((0.1, 0.1), (0.1, 0.5), (0.5, 0.5), (0.5, 0.9), (0.9, 0.9), (0.9, 0.3), (0.4, 0.3), (0.1, 0.1))
-        anchorpoints = tuple((vp.overGridMin()[0] * a + vp.overGridMax()[0] * (1-a),
-                              vp.overGridMin()[1] * b + vp.overGridMax()[1] * (1-b)) for a,b in anchorweights)
+        anchorpoints = tuple(self.vp.weights2grid_sel((1-a)*(1-b),
+                                                      a*(1-b),
+                                                      (1-a)*b,
+                                                      a*b) for a,b in anchorweights)
 
         anchorleans = (True, None, None, True, None, None, True)
 
+        self.vp.reset_grid_sel()
+        
         kp = list()
         for p0, p1, lean in zip(anchorpoints, anchorpoints[1:], anchorleans):
-            kp.extend(jr.koch2_path(p0, p1, separate * separate / 100.0, fixedR=1/4, leanLeft=lean))
+            kp.extend(self.jr.koch2_path(p0, p1, self.separate * self.separate / 100.0, fixedR=1/4, leanLeft=lean))
 
         lmap.set_simplex_sea(kp)
         for pID, qID in lmap.convex_hull_edges():
@@ -413,51 +425,60 @@ class _ut_LevelMapper(unittest.TestCase):
         if ml is None or ml is False:
             ml = 0
             
-        view = PIL.Image.new('RGB', vp.viewSize())
-        lmap.draw_edges(view, grid2view_fn=vp.grid2view,
+        view = PIL.Image.new('RGB', self.vp.view_size())
+        lmap.draw_edges(view, grid2view_fn=self.vp.grid2view,
                         edge_color_fn = lambda pID, qID: (lmap.level_color(pID, maxLevel=ml),
                                                           lmap.level_color(qID, maxLevel=ml)))
         for kPoint in kp:
-            kXY = tuple(int(p) for p in vp.grid2view(kPoint))
-            if(0 <= kXY[0] < vp.gridSize()[0] and 0 <= kXY[1] < vp.gridSize()[1]):
+            kXY = tuple(int(p) for p in self.vp.grid2view(kPoint))
+            if(0 <= kXY[0] < self.vp.grid_size()[0] and 0 <= kXY[1] < self.vp.grid_size()[1]):
                 #view.putpixel(kXY, LevelMapper._errorColor)
                 pass
         
         self.quickview(view)
 
-    def test_levelize(self):        
-        jr = jrandom.JRandom()
-        vp = jutil.Viewport(gridSize = (1024, 768),
-                            viewSize = (1024, 768),
-                            gridExpand = 0.9)
-        separate = 15
-        points = list(jr.punctillate_rect(pMin = vp.overGridMin(),
-                                          pMax = vp.overGridMax(),
-                                          distsq = separate * separate))
-        lmap = LevelMapper(points)
-        lmap.forbid_long_edges(5 * separate)
+    
+    def test_levelize(self):
+        self.separate = 7
+        self.vp.zoom_grid_sel(1.05)
+        lmap = self.quickgrid()
+        self.vp.zoom_grid_sel(1.1)
+        
+        kp = list()
+        weights = ((0.5, 0.5, 0, 0), (0, 0.5, 0, 0.5), (0, 0, 0.5, 0.5), (0.5, 0, 0.5, 0), (0.5, 0.5, 0, 0))
+        anchors = tuple(self.vp.weights2grid_sel(*w) for w in weights)
 
-        lmap.set_hull_sea()
+        self.vp.reset_grid_sel()
+        
+        for p0, p1 in zip(anchors, anchors[1:]):
+            kp.extend(self.jr.koch2_path(p0, p1, self.separate * self.separate / 100.0,
+                                         fixedR=self.jr.uniform(1/5,1/3), leanLeft=None))
+
+        lmap.set_simplex_sea(kp)
+        
+        for pID, qID in lmap.convex_hull_edges():
+            lmap.set_fill_sea(pID)
+
         lmap.levelize()
-
+        
         for turn in (7,):
             nines = list(pID for pID in lmap._level if lmap._level[pID] == turn)
             while(nines):
-                lmap.add_river_source(jr.choice(nines))
+                lmap.add_river_source(self.jr.choice(nines))
                 lmap.levelize()
                 nines = list(pID for pID in lmap._level if lmap._level[pID] == turn)
 
         lmap.remove_river_stubs(12)
-
+        
         for ignoreSea in (False, True, False):
-            lmap.levelize(ignoreSea=ignoreSea)
+            lmap.levelize(ignoreSea=ignoreSea, maxIterations=100)
 
             ml = lmap.max_level()
             if ml is None or ml is False:
                 ml = 0
 
-            view = PIL.Image.new('RGB', vp.viewSize())
-            lmap.draw_edges(view, grid2view_fn=vp.grid2view,
+            view = PIL.Image.new('RGB', self.vp.view_size())
+            lmap.draw_edges(view, grid2view_fn=self.vp.grid2view,
                             edge_color_fn = lambda pID, qID: (lmap.level_color(pID, maxLevel=ml),
                                                               lmap.level_color(qID, maxLevel=ml)))
             self.quickview(view)
@@ -465,28 +486,19 @@ class _ut_LevelMapper(unittest.TestCase):
     
     
     def test_alternate_start(self):
-        jr = jrandom.JRandom()
-        vp = jutil.Viewport(gridSize = (1024, 768),
-                            viewSize = (1024, 768),
-                            gridExpand = 0.9)
-        separate = 15
+        self.separate = 7
+        self.vp.zoom_grid_sel(1.05)
         
-        gCenter = (vp.gridSize()[0] / 2.0, vp.gridSize()[1] / 2.0)
-        maxrad = min(vp.overGridMax()[0] - vp.overGridMin()[0],
-                     vp.overGridMax()[1] - vp.overGridMin()[1]) / 2.0
+        gCenter = self.vp.weights2grid_sel(0.5, 0, 0, 0.5)
+        gHSpan = self.vp.weights2grid_sel(-0.5, 0, 0, 0.5)
+        self.vp.reset_grid_sel()
+
+        maxrad = min(gHSpan[0], gHSpan[1])
         minrad = maxrad / 1.5
-        base, evenAmplSeq, oddAmplSeq = jr.tonal_rand(minrad, maxrad, 11)
+        base, evenAmplSeq, oddAmplSeq = self.jr.tonal_rand(minrad, maxrad, 11)
 
         rfilter = jutil.in_radial_fn(gCenter, base, evenAmplSeq, oddAmplSeq)
-        
-        points = list(point for point in
-                      jr.punctillate_rect(pMin = vp.overGridMin(),
-                                          pMax = vp.overGridMax(),
-                                          distsq = separate * separate)
-                      if rfilter(point))
-        
-        lmap = LevelMapper(points)
-        lmap.forbid_long_edges(5 * separate)
+        lmap = self.quickgrid(filter=rfilter)
 
         lmap.set_hull_sea()
         lmap.levelize()
@@ -495,8 +507,8 @@ class _ut_LevelMapper(unittest.TestCase):
         if ml is None or ml is False:
             ml = 0
         
-        view = PIL.Image.new('RGB', vp.viewSize())
-        lmap.draw_edges(view, grid2view_fn=vp.grid2view,
+        view = PIL.Image.new('RGB', self.vp.view_size())
+        lmap.draw_edges(view, grid2view_fn=self.vp.grid2view,
                         edge_color_fn = lambda pID, qID: (lmap.level_color(pID, maxLevel=ml),
                                                           lmap.level_color(qID, maxLevel=ml)))
         self.quickview(view)

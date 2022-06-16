@@ -97,44 +97,54 @@ class HeightMapper(levelmap.LevelMapper):
 
 
 class _ut_HeightMapper(unittest.TestCase):
+    def setUp(self):
+        self.jr = jrandom.JRandom();
+        self.vp = jutil.Viewport(gridSize = (18000, 18000),
+                                 viewSize = (1024, 1024))
+        self.separate = 110
+        
     def quickview(self, view):
-        view.save("unittest.png")
+        view.save("unittest.png");
         proc = subprocess.Popen(("display", "unittest.png"))
         proc.wait();
-        os.remove("unittest.png")
+        os.remove("unittest.png");
 
+    def quickgrid(self, *, filter=None):
+        points = list(p for p in self.jr.punctillate_rect(pMin = self.vp.grid_sel_min(),
+                                                          pMax = self.vp.grid_sel_max(),
+                                                          distsq = self.separate * self.separate)
+                      if filter is None or filter(p))
+        lmap = HeightMapper(points, jr=self.jr)
+        lmap.forbid_long_edges(5 * self.separate)
+        self.assertTupleEqual(tuple(lmap.isolated_nodes()), ())
+        
+        return lmap
+        
     def test_gen_heights(self):
-        jr = jrandom.JRandom()
-        vp = jutil.Viewport(gridSize = (18000, 18000),
-                            viewSize = (1024, 1024),
-                            gridExpand = 0.9)
-        separate = 110
-        points = list(jr.punctillate_rect(pMin = vp.overGridMin(),
-                                          pMax = vp.overGridMax(),
-                                          distsq = separate * separate))
-        hmap = HeightMapper(points, jr=jr)
-        hmap.forbid_long_edges(5 * separate)
-        self.assertTupleEqual(tuple(hmap.isolated_nodes()), ())
-
+        self.vp.zoom_grid_sel(1.05)
+        
+        hmap = self.quickgrid()
+        self.vp.reset_grid_sel()
+        
         hmap.set_hull_sea()
         hmap.levelize()
 
-        for turn in (int(3500 / separate), int(1100 / separate)):
+        for turn in (int(3500 / self.separate), int(1100 / self.separate)):
             nines = list(pID for pID in hmap._level if hmap._level[pID] == turn)
             while(nines):
-                hmap.add_river_source(jr.choice(nines))
+                hmap.add_river_source(self.jr.choice(nines))
                 hmap.levelize()
                 nines = list(pID for pID in hmap._level if hmap._level[pID] == turn)
 
-        hmap.remove_river_stubs(int(1200 / separate))
+        hmap.remove_river_stubs(int(1200 / self.separate))
         hmap.levelize()
 
         ml = hmap.max_level()
         if ml is None or ml is False:
             ml = 0
 
-        view = PIL.Image.new('RGB', vp.viewSize())
-        hmap.draw_edges(view, grid2view_fn=vp.grid2view,
+        view = PIL.Image.new('RGB', self.vp.view_size())
+        hmap.draw_edges(view, grid2view_fn=self.vp.grid2view,
                         edge_color_fn = lambda pID, qID: (hmap.level_color(pID, maxLevel=ml),
                                                           hmap.level_color(qID, maxLevel=ml)))
         self.quickview(view)
@@ -156,8 +166,8 @@ class _ut_HeightMapper(unittest.TestCase):
                 return (hmap.height_color(pID),
                         hmap.height_color(qID))
         
-        view = PIL.Image.new('RGB', vp.viewSize())
-        hmap.draw_edges(view, grid2view_fn=vp.grid2view,
+        view = PIL.Image.new('RGB', self.vp.view_size())
+        hmap.draw_edges(view, grid2view_fn=self.vp.grid2view,
                         edge_color_fn = edge_color_fn)
         self.quickview(view)
 
