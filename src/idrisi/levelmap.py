@@ -4,6 +4,7 @@
 import idrisi.delmap as delmap
 import idrisi.jrandom as jrandom
 import idrisi.jutil as jutil
+import math
 import os
 import PIL.Image
 import subprocess
@@ -120,6 +121,32 @@ class LevelMapper(delmap.DelMapper):
     def neighbors(self, pID):
         ## Yield the adjacent nodes whose edges are not forbidden
         yield from (qID for qID in self.adjacent_nodes(pID) if not self.is_edge_forbidden(pID, qID))
+
+    def community(self, pID, maxDist):
+        ## Return a dict[node] => distance for nodes within dist of pID
+        ## (including pID), as measured along non-forbidden edges
+        result = dict()
+        result[pID] = 0.0
+        toCheck = {pID}
+
+        while(toCheck):
+            pID = toCheck.pop()
+            pPoint = self.point(pID)
+            pDist = result[pID]
+            rDist = maxDist - pDist
+            rDistSq = rDist * rDist
+            for qID in self.neighbors(pID):
+                qPoint = self.point(qID)
+                pqPoint = (qPoint[0] - pPoint[0], qPoint[1]-pPoint[1])
+                pqLenSq = pqPoint[0] * pqPoint[0] + pqPoint[1] * pqPoint[1]
+                if pqLenSq <= rDistSq:
+                    pqLen = math.sqrt(pqLenSq)
+                    qDist = pDist + pqLen
+                    if qID not in result or qDist < result[qID]:
+                        result[qID] = qDist
+                        toCheck.add(qID)
+
+        return result
 
     def is_lower(self, pLevel, qLevel, *, ignoreSea=False):
         ## Returns true if qLevel is lower than pLevel
@@ -300,6 +327,24 @@ class LevelMapper(delmap.DelMapper):
 
             return tuple(a * wf + b * wc for a,b in zip(LevelMapper._landColorSeq[cfidx],
                                                         LevelMapper._landColorSeq[ccidx]))
+    
+    def gen_drain_levels(self):
+        drains = dict()
+
+        for pID, pLevel in self._level.items():
+            if pLevel == 0:
+                while(pID is not None):
+                    drains[pID] = 1 + drains.get(pID, 0)
+                    for qID in self.neighbors(pID):
+                        qLevel = self._level.get(qID, None)
+                        if qLevel is None:
+                            pID = None
+                            break
+                        if qLevel < pLevel:                            
+                            pID = qID
+                            pLevel = qLevel
+
+        return drains                    
                 
 class _ut_LevelMapper(unittest.TestCase):
     def setUp(self):
@@ -342,6 +387,27 @@ class _ut_LevelMapper(unittest.TestCase):
         view = PIL.Image.new('RGB', self.vp.view_size())
         lmap.draw_edges(view, grid2view_fn=self.vp.grid2view,
                         edge_color_fn = lambda pID, qID: (color_edge(pID, qID), color_edge(qID, pID)))
+        self.quickview(view)
+
+
+    def test_community(self):
+        self.vp.zoom_grid_sel(1.1)
+        lmap = self.quickgrid()
+        self.vp.reset_grid_sel()
+
+        community = lmap.community(0, self.separate * 10)
+
+        def color_node(pID):
+            if(pID in community):
+                return LevelMapper._forbiddenColor
+            else:
+                return LevelMapper._uninitColor
+
+        self.vp.set_view_size((1920,1080))
+        self.vp.reaspect_grid_sel()
+        view = PIL.Image.new('RGB', self.vp.view_size())
+        lmap.draw_edges(view, grid2view_fn=self.vp.grid2view,
+                        edge_color_fn = lambda pID, qID: (color_node(pID), color_node(qID)))
         self.quickview(view)
 
 
