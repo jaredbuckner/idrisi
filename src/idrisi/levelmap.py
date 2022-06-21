@@ -165,8 +165,25 @@ class LevelMapper(delmap.DelMapper):
                 ml = level
 
         return ml
+
+    def _level_from_neighbors(self, pID, *, shoreLevel=1):
+        nLevel = None
         
-    def is_valid_level(self, pID, *, ignoreSea=False):
+        for qID in self.neighbors(pID):
+            if qID not in self._level: continue
+            qLevel = self._level[qID]
+            if(qLevel is None):
+                if nLevel is None or nLevel >= shoreLevel:
+                    nLevel = shoreLevel - 1
+            elif(qLevel <= 0):
+                return(1)
+            else:
+                if nLevel is None or nLevel > qLevel:
+                    nLevel = qLevel
+
+        return nLevel if nLevel is None else nLevel + 1
+        
+    def is_valid_level(self, pID, *, shoreLevel=1):
         ## Check a point and return True if the level value for this point
         ## exists and obeys all rules, False otherwise
 
@@ -180,33 +197,22 @@ class LevelMapper(delmap.DelMapper):
         if(pLevel is None):
             return(True)
 
-        ## Shore must border a sea or river
         ## Rivers must have an outflow
-        if(pLevel <= 1):            
-            return(any(self.is_lower(pLevel, self._level[qID],
-                                     ignoreSea=ignoreSea if pLevel == 1 else False)
+        if(pLevel <= 0):            
+            return(any(self.is_lower(pLevel, self._level[qID])
                        for qID in self.neighbors(pID) if qID in self._level))
         
-        ## Non-shore land must be a level one higher than its lowest neighbor
-        hasOneLNeighbor = False
-        for qID in self.neighbors(pID):
-            if qID in self._level:
-                qLevel = self._level[qID]
-                if ignoreSea and qLevel is None:
-                    continue
-                if qLevel is None or qLevel < pLevel - 1:
-                    return(False)
-                if qLevel == pLevel - 1:
-                    hasOneLNeighbor = True
-                    
-        return(hasOneLNeighbor)
+        ## Non-shore land must be one level one higher than its lowest neighbor
+        ##
+        pOughtToBe = self._level_from_neighbors(pID, shoreLevel=shoreLevel)
+        return pOughtToBe is not None and pOughtToBe == pLevel
         
-    def levelize(self, *, ignoreSea=False, maxIterations=None):
+    def levelize(self, *, shoreLevel=1, maxIterations=None):
         invalids = set()
         for pID, pPoint in self.enumerate_points():
-            if self.is_valid_level(pID, ignoreSea=ignoreSea):
+            if self.is_valid_level(pID, shoreLevel=shoreLevel):
                 for qID in self.neighbors(pID):
-                    if not self.is_valid_level(qID, ignoreSea=ignoreSea):
+                    if not self.is_valid_level(qID, shoreLevel=shoreLevel):
                         invalids.add(qID)
 
         iteration=0
@@ -220,30 +226,20 @@ class LevelMapper(delmap.DelMapper):
                         del self._level[pID]
                     for qID in self.neighbors(pID):
                         if(qID in self._level and
-                           not self.is_valid_level(qID, ignoreSea=ignoreSea)):
+                           not self.is_valid_level(qID, shoreLevel=shoreLevel)):
                             invalids.add(qID)
                 break
                 
             nextInvalids = set()
             
             for pID in invalids:
-                pLevel = None
-                for qID in self.neighbors(pID):
-                    if qID in self._level:
-                        qLevel = self._level[qID]
-                        if ignoreSea and qLevel is None:
-                            continue
-                        if qLevel is None or qLevel < 1:
-                            pLevel = 1
-                            break
-                        elif pLevel is None or qLevel < pLevel:
-                            pLevel = qLevel + 1
+                pLevel = self._level_from_neighbors(pID, shoreLevel=shoreLevel)
                 if(pLevel is None):
                     nextInvalids.add(pID)
                 else:
                     self._level[pID] = pLevel
                     for qID in self.neighbors(pID):
-                        if(not self.is_valid_level(qID, ignoreSea=ignoreSea)):
+                        if(not self.is_valid_level(qID, shoreLevel=shoreLevel)):
                             nextInvalids.add(qID)
             invalids = nextInvalids
         
@@ -536,8 +532,8 @@ class _ut_LevelMapper(unittest.TestCase):
 
         lmap.remove_river_stubs(12)
         
-        for ignoreSea in (False, True, False):
-            lmap.levelize(ignoreSea=ignoreSea, maxIterations=100)
+        for shoreLevel in (1, 5, 1):
+            lmap.levelize(shoreLevel=shoreLevel, maxIterations=100)
 
             ml = lmap.max_level()
             if ml is None or ml is False:

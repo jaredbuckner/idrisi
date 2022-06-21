@@ -52,15 +52,17 @@ class HeightMapper(levelmap.LevelMapper):
 
         levelorder = sorted(level2nodes.keys())
         for pLevel in levelorder:
-            for pID in level2nodes[pLevel]:
+            IDSeq = level2nodes[pLevel]
+            # IDSeq.sort(key=lambda pID: min(self._height[qID] for qID in self.neighbors(pID) if qID in self._height))
+            for pID in IDSeq:
                 pMinHeight = None  ## The minimum height -- the highest + minslope                
                 pMaxHeight = None  ## The maximum height -- the lowest + maxslope
                 pPoint = self.point(pID)
                 pHeight, slopeMin, slopeMax = slope_fn(pLevel, pID)
                 for qID in self.neighbors(pID):
-                    qLevel = self._level[qID]
-                    if qLevel is None or qLevel < pLevel:
+                    if(qID in self._height):
                         qHeight = self._height[qID]
+                        qLevel = self._level[qID]
                         qPoint = self.point(qID)
                         delta = (pPoint[0] - qPoint[0],
                                  pPoint[1] - qPoint[1])
@@ -71,16 +73,19 @@ class HeightMapper(levelmap.LevelMapper):
                             newMinIncr = 0
                         newMaxIncr = (dist * slopeMax * (1 if qHeight >=0 else underwaterMul)
                                       + self._jr.uniform(-variance, +variance))
-                        newMinHeight = qHeight + newMinIncr
-                        newMaxHeight = qHeight + newMaxIncr
-                        
+                        if qLevel is None or qLevel < pLevel:
+                            newMinHeight = qHeight + newMinIncr
+                        else:
+                            newMinHeight = qHeight - newMaxIncr
+                            
                         if pMinHeight is None or pMinHeight < newMinHeight:
                             pMinHeight = newMinHeight
                             
+                        newMaxHeight = qHeight + newMaxIncr                            
                         if pMaxHeight is None or pMaxHeight > newMaxHeight:
                             pMaxHeight = newMaxHeight
 
-                self._height[pID] = max(min(pHeight, pMaxHeight), pMinHeight)
+                self._height[pID] = max(min(pHeight if pHeight is not None else pMaxHeight, pMaxHeight), pMinHeight)
                 
         self._update_height_stats()            
 
