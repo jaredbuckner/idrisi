@@ -47,6 +47,13 @@ class LevelMapper(delmap.DelMapper):
         ## slopes.
         self._forbiddenEdges = set()
 
+    def level(self, pID, default=False):
+        '''Returns the level, or False if not levelized yet'''
+        return(self._level.get(pID, default))
+
+    def levels(self):
+        yield from self._level.items()
+    
     def is_edge_forbidden(self, aPID, bPID):
         return(((aPID, bPID) if aPID < bPID else (bPID, aPID)) in self._forbiddenEdges)
                
@@ -128,7 +135,7 @@ class LevelMapper(delmap.DelMapper):
         result = dict()
         result[pID] = 0.0
         toCheck = {pID}
-
+        
         while(toCheck):
             pID = toCheck.pop()
             pPoint = self.point(pID)
@@ -148,18 +155,18 @@ class LevelMapper(delmap.DelMapper):
 
         return result
 
-    def is_lower(self, pLevel, qLevel, *, ignoreSea=False):
+    def is_lower(self, pLevel, qLevel):
         ## Returns true if qLevel is lower than pLevel
         return(pLevel is not None and
-               ((not ignoreSea and qLevel is None) or
+               (qLevel is None or
                 (qLevel is not None and qLevel < pLevel)));
-
+    
     def max_level(self):
         ## Returns False if no level has been set,
         ##         None if only sea levels have been set, or
         ##         the max level value found
         ml = False
-
+        
         for pID, level in self._level.items():
             if (ml is False or ml is None or (level is not None and level > ml)):
                 ml = level
@@ -186,17 +193,17 @@ class LevelMapper(delmap.DelMapper):
     def is_valid_level(self, pID, *, shoreLevel=1):
         ## Check a point and return True if the level value for this point
         ## exists and obeys all rules, False otherwise
+        
+        pLevel = self._level.get(pID, False)
 
         ## Empty level is not valid
-        if pID not in self._level:
+        if pLevel is False:
             return(False)
-
-        pLevel = self._level[pID]
         
         ## Sea level is always valid
-        if(pLevel is None):
+        if pLevel is None:
             return(True)
-
+        
         ## Rivers must have an outflow
         if(pLevel <= 0):            
             return(any(self.is_lower(pLevel, self._level[qID])
@@ -206,15 +213,15 @@ class LevelMapper(delmap.DelMapper):
         ##
         pOughtToBe = self._level_from_neighbors(pID, shoreLevel=shoreLevel)
         return pOughtToBe is not None and pOughtToBe == pLevel
+
+    def levelizables(self, *, shoreLevel=1):
+        yield from (pID for pID, pPoint in self.enumerate_points() if
+                    not self.is_valid_level(pID, shoreLevel=shoreLevel) and
+                    any(self.is_valid_level(qID, shoreLevel=shoreLevel) for qID in self.neighbors(pID)))    
         
     def levelize(self, *, shoreLevel=1, maxIterations=None):
-        invalids = set()
-        for pID, pPoint in self.enumerate_points():
-            if self.is_valid_level(pID, shoreLevel=shoreLevel):
-                for qID in self.neighbors(pID):
-                    if not self.is_valid_level(qID, shoreLevel=shoreLevel):
-                        invalids.add(qID)
-
+        invalids = set(self.levelizables(shoreLevel=shoreLevel))
+        
         iteration=0
         while(invalids and (maxIterations is None or iteration < maxIterations)):
             iteration += 1
