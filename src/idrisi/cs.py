@@ -65,7 +65,7 @@ if __name__ == '__main__':
     jr = jrandom.JRandom()
     vp = jutil.Viewport(gridSize = (18000, 18000),
                         viewSize = (1200, 1200))
-    separate = 31 # 53
+    separate = 151 # 53
     
     # Create land beyond the outer rim by another 2km on each side
     vp.set_grid_sel((-2000, -2000), (20000, 20000))
@@ -163,13 +163,20 @@ if __name__ == '__main__':
 
     maxHeight = min(984, springs + separate * maxRevisLevel * 0.5)    
 
-    flatValues = [(0, 0.005, 0.01), (springs, 0.005, 0.02)]
-    landValues = [(springs, 0.01, 0.03),
-                  (springs * 24/25 + maxHeight * 1/25, 0.01, 0.04),
-                  (springs * 21/25 + maxHeight * 4/25, 0.01, 0.10),
-                  (springs * 16/25 + maxHeight * 9/25, 0.01, 0.15),
-                  (springs * 9/25 + maxHeight * 16/25, 0.01, 0.30),
-                  (maxHeight, 0.01, 0.90)]
+    ## flatValues = [(0, 0.005, 0.01), (springs, 0.005, 0.02)]
+    ## landValues = [(springs, 0.01, 0.03),
+    ##               (springs * 24/25 + maxHeight * 1/25, 0.01, 0.04),
+    ##               (springs * 21/25 + maxHeight * 4/25, 0.01, 0.10),
+    ##               (springs * 16/25 + maxHeight * 9/25, 0.01, 0.15),
+    ##               (springs * 9/25 + maxHeight * 16/25, 0.01, 0.30),
+    ##               (maxHeight, 0.01, 0.90)]
+    flatValues = [(None, 0.005, 0.01), (None, 0.005, 0.02)]
+    landValues = [(None, 0.01, 0.03),
+                  (None, 0.01, 0.04),
+                  (None, 0.01, 0.10),
+                  (None, 0.01, 0.15),
+                  (None, 0.01, 0.30),
+                  (None, 0.01, 0.90)]
     flatWeights = jutil.make_array_interp(len(flatValues), 0, flatInfluence)
     landWeights = jutil.make_array_interp(len(landValues), flatInfluence, maxRevisLevel)
         
@@ -181,16 +188,16 @@ if __name__ == '__main__':
         if pLevel <= 0:            
             if pID in drains:
                 dmag = drains[pID]
-                return(springs / dmag, 0.002 / dmag, 0.02 / dmag)
+                return(None, 0.002 / dmag, 0.02 / dmag)
 
-            return(springs, 0.01, 0.10)
+            return(None, 0.003, 0.03)
 
         if(pLevel <= flatInfluence):
             aID, aW, bID, bW = flatWeights(pLevel)
-            return tuple(a * aW + b * bW for a, b in zip(flatValues[aID], flatValues[bID]))
+            return tuple(a * aW + b * bW if a is not None and b is not None else None for a, b in zip(flatValues[aID], flatValues[bID]))
 
         aID, aW, bID, bW = landWeights(pLevel)
-        return tuple(a * aW + b * bW for a, b in zip(landValues[aID], landValues[bID]))
+        return tuple(a * aW + b * bW if a is not None and b is not None else None for a, b in zip(landValues[aID], landValues[bID]))
 
     hmap.gen_heights(minmaxslope, sea_height=-40)
 

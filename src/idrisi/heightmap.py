@@ -36,56 +36,112 @@ class HeightMapper(levelmap.LevelMapper):
 
         if self._highest is not None:
             self._lcinterp = jutil.make_array_interp(len(HeightMapper._landcolors), 0.0, self._highest)
+
+    ## Returns minHeight, nomHeight, maxHeight
+    def _heights_from_neighbors(self, pID, *,
+                                nominalHeight=None,
+                                minSlope=0.001,
+                                maxSlope=100):
+        minHeight = None
+        maxHeight = None
         
+        pLevel = self.level(pID)
+        pPoint = self.point(pID)
+        
+        for qID in self.neighbors(pID):
+            if qID not in self._height: continue
+
+            qPoint = self.point(qID)
+            qDel = (qPoint[0] - pPoint[0], qPoint[1] - pPoint[1])
+            qDist = math.sqrt(qDel[0] * qDel[0] + qDel[1] * qDel[1])
+            qHeight = self._height[qID]
+            qLevel = self.level(qID)
+            
+            aHeight = qHeight + maxSlope * qDist;
+            if(maxHeight is None or maxHeight > aHeight):
+                maxHeight = aHeight
+            
+            if(self.is_lower(pLevel, qLevel)):
+                dHeight = qHeight + minSlope * qDist;
+                if(minHeight is None or minHeight < dHeight):
+                    minHeight = dHeight
+            ## else:
+            ##     nHeight = qHeight - maxSlope * qDist;
+            ##     if(minHeight is None or minHeight < nHeight):
+            ##         minHeight = nHeight
+
+        if (nominalHeight is None):
+            nominalHeight = (maxHeight if minHeight is None else
+                             minHeight if maxHeight is None else
+                             minHeight / 2 + maxHeight / 2)
+
+        ## If there is no valid region, no reason to clip
+        if (minHeight is None or maxHeight is None or maxHeight >= minHeight):
+            if (maxHeight is not None and nominalHeight > maxHeight):
+                nominalHeight = maxHeight
+                
+            if (minHeight is not None and nominalHeight < minHeight):
+                nominalHeight = minHeight
+        
+        return(minHeight, nominalHeight, maxHeight)
+    
+    def is_valid_height(self, pID, *,
+                        minSlope=0.001,
+                        maxSlope=100):
+        pHeight = self._height.get(pID, None)
+        if pHeight is None: return(False)
+        
+        minHeight, nominalHeight, maxHeight = self._heights_from_neighbors(pID,
+                                                                           minSlope=0.001,
+                                                                           maxSlope=100);
+        return(minHeight <= pHeight <= maxHeight)
+
+
     def gen_heights(self, slope_fn, sea_height, *,
-                    underwaterMul = 3, variance=0.1):
+                    underwaterMul = 3, variance=0.1, epsilon=0.1):
         ## nominalHeight, minSlope, maxSlope = slope_fn(pLevel, pID)
         self._height = dict()
-        
-        level2nodes = dict()
+
+        invalids = dict()
 
         for pID, pLevel in self._level.items():
             if pLevel is None:
                 self._height[pID] = sea_height + self._jr.uniform(-variance, +variance)
-            else:
-                level2nodes.setdefault(pLevel, list()).append(pID)
-
-        levelorder = sorted(level2nodes.keys())
-        for pLevel in levelorder:
-            IDSeq = level2nodes[pLevel]
-            # IDSeq.sort(key=lambda pID: min(self._height[qID] for qID in self.neighbors(pID) if qID in self._height))
-            for pID in IDSeq:
-                pMinHeight = None  ## The minimum height -- the highest + minslope                
-                pMaxHeight = None  ## The maximum height -- the lowest + maxslope
-                pPoint = self.point(pID)
-                pHeight, slopeMin, slopeMax = slope_fn(pLevel, pID)
                 for qID in self.neighbors(pID):
-                    if(qID in self._height):
-                        qHeight = self._height[qID]
-                        qLevel = self._level[qID]
-                        qPoint = self.point(qID)
-                        delta = (pPoint[0] - qPoint[0],
-                                 pPoint[1] - qPoint[1])
-                        dist = math.sqrt(delta[0]*delta[0] + delta[1]*delta[1])
-                        newMinIncr = (dist * slopeMin * (1 if qHeight >=0 else underwaterMul)
-                                      + self._jr.uniform(-variance, +variance))
-                        if newMinIncr < 0:
-                            newMinIncr = 0
-                        newMaxIncr = (dist * slopeMax * (1 if qHeight >=0 else underwaterMul)
-                                      + self._jr.uniform(-variance, +variance))
-                        if qLevel is None or qLevel < pLevel:
-                            newMinHeight = qHeight + newMinIncr
-                        else:
-                            newMinHeight = qHeight - newMaxIncr
-                            
-                        if pMinHeight is None or pMinHeight < newMinHeight:
-                            pMinHeight = newMinHeight
-                            
-                        newMaxHeight = qHeight + newMaxIncr                            
-                        if pMaxHeight is None or pMaxHeight > newMaxHeight:
-                            pMaxHeight = newMaxHeight
+                    qLevel = self.level(qID)
+                    if qLevel is not None:
+                        invalids[qID] = qLevel
 
-                self._height[pID] = max(min(pHeight if pHeight is not None else pMaxHeight, pMaxHeight), pMinHeight)
+        pvSeq = list(invalids.keys())
+        while(pvSeq or invalids):
+            if not pvSeq:
+                pvSeq = list(invalids.keys())
+            
+            print(f'{len(pvSeq)}/{len(invalids)}/{len(self._level)-len(self._height)}')
+            pID = pvSeq.pop()
+            pLevel = invalids.pop(pID)
+            
+            nominalHeight, minSlope, maxSlope = slope_fn(pLevel, pID)
+            minHeight, pHeight, maxHeight = self._heights_from_neighbors(pID,
+                                                                         nominalHeight=nominalHeight,
+                                                                         minSlope=minSlope,
+                                                                         maxSlope=maxSlope)
+            ## print(f'{pID=} {nominalHeight=} {minSlope=} {maxSlope=}')
+            ## print(f'  {minHeight=}, {pHeight=}, {maxHeight=}')
+            if pHeight is not None:
+                oldHeight = self._height.get(pID, None)
+                if(oldHeight is not None):
+                    pHeight = pHeight * 0.9 + oldHeight * 0.1                    
+                    if minHeight is not None and pHeight < minHeight:
+                        pHeight = minHeight
+
+                self._height[pID] = pHeight
+                
+                if oldHeight is None or abs(pHeight - oldHeight) > epsilon:
+                    for qID in self.neighbors(pID):
+                        qLevel = self.level(qID)
+                        if qLevel is not None:
+                            invalids[qID] = qLevel
                 
         self._update_height_stats()            
 
