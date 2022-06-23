@@ -219,36 +219,18 @@ class LevelMapper(delmap.DelMapper):
                     not self.is_valid_level(pID, shoreLevel=shoreLevel) and
                     any(self.is_valid_level(qID, shoreLevel=shoreLevel) for qID in self.neighbors(pID)))    
         
-    def levelize(self, *, shoreLevel=1, maxIterations=None):
+    def levelize(self, *, shoreLevel=1):
         invalids = set(self.levelizables(shoreLevel=shoreLevel))
         
-        iteration=0
-        while(invalids and (maxIterations is None or iteration < maxIterations)):
-            iteration += 1
+        while(invalids):
+            pID = invalids.pop()
+            pLevel = self._level_from_neighbors(pID, shoreLevel=shoreLevel)
+            if(pLevel is not None):
+                self._level[pID] = pLevel
+                for qID in self.neighbors(pID):
+                    if(not self.is_valid_level(qID, shoreLevel=shoreLevel)):
+                        invalids.add(qID)
 
-            if(maxIterations is not None and iteration >= maxIterations):
-                while(invalids):
-                    pID = invalids.pop()
-                    if pID in self._level:
-                        del self._level[pID]
-                    for qID in self.neighbors(pID):
-                        if(qID in self._level and
-                           not self.is_valid_level(qID, shoreLevel=shoreLevel)):
-                            invalids.add(qID)
-                break
-                
-            nextInvalids = set()
-            
-            for pID in invalids:
-                pLevel = self._level_from_neighbors(pID, shoreLevel=shoreLevel)
-                if(pLevel is None):
-                    nextInvalids.add(pID)
-                else:
-                    self._level[pID] = pLevel
-                    for qID in self.neighbors(pID):
-                        if(not self.is_valid_level(qID, shoreLevel=shoreLevel)):
-                            nextInvalids.add(qID)
-            invalids = nextInvalids
         
     def add_river_source(self, pID):
         pLevel = self._level.get(pID)
@@ -540,7 +522,7 @@ class _ut_LevelMapper(unittest.TestCase):
         lmap.remove_river_stubs(12)
         
         for shoreLevel in (1, 5, 1):
-            lmap.levelize(shoreLevel=shoreLevel, maxIterations=100)
+            lmap.levelize(shoreLevel=shoreLevel)
 
             ml = lmap.max_level()
             if ml is None or ml is False:
