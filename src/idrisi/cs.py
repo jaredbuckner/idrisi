@@ -65,7 +65,7 @@ if __name__ == '__main__':
     jr = jrandom.JRandom()
     vp = jutil.Viewport(gridSize = (18000, 18000),
                         viewSize = (1200, 1200))
-    separate = 151 # 53
+    separate = 53
     
     # Create land beyond the outer rim by another 2km on each side
     vp.set_grid_sel((-2000, -2000), (20000, 20000))
@@ -131,19 +131,20 @@ if __name__ == '__main__':
     
     maxMajorLevel=river_extension(hmap, jr=jr, vp=vp, separate=separate,
                                   searchLength=5000, viewStr="major",
-                                  maxIterations=100)
-    maxMinorLevel=river_extension(hmap, jr=jr, vp=vp, separate=separate,
-                                  searchLength=1000, viewStr="minor",
-                                  clipLength=2000,
                                   maxIterations=200)
+    maxMinorLevel=river_extension(hmap, jr=jr, vp=vp, separate=separate,
+                                  searchLength=1500, viewStr="minor",
+                                  influenceLength=500,
+                                  maxIterations=800)
 
     drains = hmap.gen_drain_levels()
     print(f"Max draining:  {max(drains.values())}")
-    
-    maxRevisLevel = river_extension(hmap, jr=jr, vp=vp, separate=separate,
-                                    searchLength=350, influenceLength=500, viewStr="Revis",
-                                    coverage=0.50,
-                                    maxIterations=100)
+
+    maxRevisLevel = maxMinorLevel
+    #maxRevisLevel = river_extension(hmap, jr=jr, vp=vp, separate=separate,
+    #                                searchLength=350, influenceLength=500, viewStr="Revis",
+    #                                coverage=0.50,
+    #                                maxIterations=100)
     
     seasinterp = jutil.make_array_interp(len(heightmap.HeightMapper._seacolors), -40, 0)
     landinterp = jutil.make_array_interp(len(heightmap.HeightMapper._landcolors), 0, 984)
@@ -158,28 +159,14 @@ if __name__ == '__main__':
             return tuple(a * aWt + b * bWt for a,b in zip(heightmap.HeightMapper._landcolors[aIdx],
                                                           heightmap.HeightMapper._landcolors[bIdx]))
     
-    springs = 30
-    flatInfluence = int(500 / separate) + 1
-
-    maxHeight = min(984, springs + separate * maxRevisLevel * 0.5)    
-
-    ## flatValues = [(0, 0.005, 0.01), (springs, 0.005, 0.02)]
-    ## landValues = [(springs, 0.01, 0.03),
-    ##               (springs * 24/25 + maxHeight * 1/25, 0.01, 0.04),
-    ##               (springs * 21/25 + maxHeight * 4/25, 0.01, 0.10),
-    ##               (springs * 16/25 + maxHeight * 9/25, 0.01, 0.15),
-    ##               (springs * 9/25 + maxHeight * 16/25, 0.01, 0.30),
-    ##               (maxHeight, 0.01, 0.90)]
-    flatValues = [(None, 0.005, 0.01), (None, 0.005, 0.02)]
     landValues = [(None, 0.01, 0.03),
-                  (None, 0.01, 0.04),
-                  (None, 0.01, 0.10),
-                  (None, 0.01, 0.15),
-                  (None, 0.01, 0.30),
-                  (None, 0.01, 0.90)]
-    flatWeights = jutil.make_array_interp(len(flatValues), 0, flatInfluence)
-    landWeights = jutil.make_array_interp(len(landValues), flatInfluence, maxRevisLevel)
-        
+                  (None, 0.01, 0.05),
+                  (None, 0.02, 0.20),
+                  (None, 0.03, 0.40),
+                  (None, 0.05, 0.70),
+                  (None, 0.10, 1.20)]
+    landWeights = jutil.make_array_interp(len(landValues), 1, maxRevisLevel)
+    
         
     def minmaxslope(pLevel, pID):
         if pLevel is None:
@@ -188,21 +175,17 @@ if __name__ == '__main__':
         if pLevel <= 0:            
             if pID in drains:
                 dmag = drains[pID]
-                return(None, 0.002 / dmag, 0.02 / dmag)
+                return(None, 0.01 / dmag, 0.05 / dmag)
 
-            return(None, 0.003, 0.03)
-
-        if(pLevel <= flatInfluence):
-            aID, aW, bID, bW = flatWeights(pLevel)
-            return tuple(a * aW + b * bW if a is not None and b is not None else None for a, b in zip(flatValues[aID], flatValues[bID]))
+            return(None, 0.01, 0.05)
 
         aID, aW, bID, bW = landWeights(pLevel)
         return tuple(a * aW + b * bW if a is not None and b is not None else None for a, b in zip(landValues[aID], landValues[bID]))
 
-    hmap.gen_heights(minmaxslope, sea_height=-40)
-
+    hmap.gen_heights(minmaxslope, sea_height=-40, maxHeight=984)
+    
     if(1):
-        widthatsource = 5
+        widthatsource = 10
         riverbeds = set()
         riversize = hmap.gen_drain_levels()
         for rID, rSize in riversize.items():
