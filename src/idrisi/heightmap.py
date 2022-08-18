@@ -129,7 +129,7 @@ class HeightMapper(levelmap.LevelMapper):
 
         invalids = dict()
 
-        for pID, pLevel in self._level.items():
+        for pID, pLevel in enumerate(self._level):
             if pLevel is None:
                 self._height[pID] = (sea_height + self._jr.uniform(-variance, +variance)) / underwaterMul
                 for qID in self.neighbors(pID):
@@ -220,11 +220,11 @@ class _ut_HeightMapper(unittest.TestCase):
         hmap.levelize()
 
         for turn in (int(3500 / self.separate), int(1100 / self.separate)):
-            nines = list(pID for pID in hmap._level if hmap._level[pID] == turn)
+            nines = list(pID for pID,lev in enumerate(hmap._level) if lev == turn)
             while(nines):
                 hmap.add_river_source(self.jr.choice(nines))
                 hmap.levelize()
-                nines = list(pID for pID in hmap._level if hmap._level[pID] == turn)
+                nines = list(pID for pID,lev in enumerate(hmap._level) if lev == turn)
 
         hmap.remove_river_stubs(int(1200 / self.separate))
         hmap.levelize()

@@ -31,6 +31,7 @@ class LevelMapper(delmap.DelMapper):
         super().__init__(pointSeq)
 
         ## The levelization for each location by pId.  Levels are:
+        ##  False : Point has not yet been levelized
         ##   None : Point belongs to the sea floor        
         ##   <= 0 : Point belongs to a river.  Zero represents a river source,
         ##          and decrements for each step away from the source.  When
@@ -39,7 +40,7 @@ class LevelMapper(delmap.DelMapper):
         ##    > 0 : Point belongs to land.  Value represents the number of
         ##          steps required to reach a river or sea node.
         ## Missing points have not yet been levelized
-        self._level = dict()
+        self._level = [False] * self.point_count()
         
         ## A set of forbidden edges.  These edges are not allowed in the slope
         ## graph.  Typically these are used to keep the algorithms from
@@ -47,12 +48,11 @@ class LevelMapper(delmap.DelMapper):
         ## slopes.
         self._forbiddenEdges = set()
 
-    def level(self, pID, default=False):
-        '''Returns the level, or False if not levelized yet'''
-        return(self._level.get(pID, default))
+    def level(self, pID):
+        return(self._level[pID])
 
     def levels(self):
-        yield from self._level.items()
+        yield from enumerate(self._level)
     
     def is_edge_forbidden(self, aPID, bPID):
         return(((aPID, bPID) if aPID < bPID else (bPID, aPID)) in self._forbiddenEdges)
@@ -120,7 +120,7 @@ class LevelMapper(delmap.DelMapper):
         stuffToFill = {pID}
         while(stuffToFill):
             pID = stuffToFill.pop()
-            if pID not in self._level:
+            if self._level[pID] is False:
                 self._level[pID] = None
                 stuffToFill.update(self.neighbors(pID))
     
@@ -167,8 +167,8 @@ class LevelMapper(delmap.DelMapper):
         ##         the max level value found
         ml = False
         
-        for pID, level in self._level.items():
-            if (ml is False or ml is None or (level is not None and level > ml)):
+        for pID, level in enumerate(self._level):
+            if (ml is False or ml is None or (level is not False and level is not None and level > ml)):
                 ml = level
 
         return ml
@@ -177,8 +177,9 @@ class LevelMapper(delmap.DelMapper):
         nLevel = None
         
         for qID in self.neighbors(pID):
-            if qID not in self._level: continue
             qLevel = self._level[qID]
+            if qLevel is False:
+                continue
             if(qLevel is None):
                 if nLevel is None or nLevel >= shoreLevel:
                     nLevel = shoreLevel - 1
@@ -194,7 +195,7 @@ class LevelMapper(delmap.DelMapper):
         ## Check a point and return True if the level value for this point
         ## exists and obeys all rules, False otherwise
         
-        pLevel = self._level.get(pID, False)
+        pLevel = self._level[pID]
 
         ## Empty level is not valid
         if pLevel is False:
@@ -207,7 +208,7 @@ class LevelMapper(delmap.DelMapper):
         ## Rivers must have an outflow
         if(pLevel <= 0):            
             return(any(self.is_lower(pLevel, self._level[qID])
-                       for qID in self.neighbors(pID) if qID in self._level))
+                       for qID in self.neighbors(pID) if self._level[qID] is not False))
         
         ## Non-shore land must be one level one higher than its lowest neighbor
         ##
@@ -233,12 +234,12 @@ class LevelMapper(delmap.DelMapper):
 
         
     def add_river_source(self, pID):
-        pLevel = self._level.get(pID)
+        pLevel = self._level[pID]
         river = list()
         while(pLevel is not None and pLevel > -len(river)):
             river.append(pID)
             for qID in self.neighbors(pID):
-                qLevel = self._level.get(qID)
+                qLevel = self._level[qID]
                 if qLevel is None:
                     pID = qID
                     pLevel = None
@@ -253,13 +254,13 @@ class LevelMapper(delmap.DelMapper):
     def remove_river_stubs(self, minLength):
         ## Look for forks, mark for deletion
         toDelete = set()
-        for pID, pLevel in self._level.items():
+        for pID, pLevel in enumerate(self._level):
             if pLevel is not None and pLevel < 0:
                 longInBranches = list()
                 shortInBranches = list()
                 
                 for qID in self.neighbors(pID):
-                    qLevel = self._level.get(qID)
+                    qLevel = self._level[qID]
                     if qLevel is not None and pLevel < qLevel < 1:
                         if -qLevel < minLength:
                             shortInBranches.append(qID)
@@ -274,21 +275,21 @@ class LevelMapper(delmap.DelMapper):
         while(toDelete):
             pID = toDelete.pop()
             pLevel = self._level[pID]
-            del self._level[pID]
+            self._level[pID] = False
             for qID in self.neighbors(pID):
-                qLevel = self._level.get(qID)
+                qLevel = self._level[qID]
                 if(qLevel is not None and pLevel < qLevel < 1):
                     toDelete.add(qID)
 
     def level_color(self, pID, *, maxLevel=1):
-        if(pID not in self._level):
-            return LevelMapper._uninitColor
         
         level = self._level[pID]
-
+        if(level is False):
+            return LevelMapper._uninitColor
+        
         if(level is None):
             return LevelMapper._seaColor
-
+        
         if(level <= 0):
             return LevelMapper._riverColor
 
@@ -316,13 +317,13 @@ class LevelMapper(delmap.DelMapper):
     def gen_drain_levels(self):
         drains = dict()
 
-        for pID, pLevel in self._level.items():
+        for pID, pLevel in enumerate(self._level):
             if pLevel == 0:
                 while(pID is not None):
                     drains[pID] = 1 + drains.get(pID, 0)
                     for qID in self.neighbors(pID):
-                        qLevel = self._level.get(qID, None)
-                        if qLevel is None:
+                        qLevel = self._level[qID]
+                        if qLevel is None or qLevel is False:
                             pID = None
                             break
                         if qLevel < pLevel:                            
@@ -513,11 +514,11 @@ class _ut_LevelMapper(unittest.TestCase):
         lmap.levelize()
         
         for turn in (7,):
-            nines = list(pID for pID in lmap._level if lmap._level[pID] == turn)
+            nines = list(pID for pID,lev in enumerate(lmap._level) if lev == turn)
             while(nines):
                 lmap.add_river_source(self.jr.choice(nines))
                 lmap.levelize()
-                nines = list(pID for pID in lmap._level if lmap._level[pID] == turn)
+                nines = list(pID for pID,lev in enumerate(lmap._level) if lev == turn)
 
         lmap.remove_river_stubs(12)
         

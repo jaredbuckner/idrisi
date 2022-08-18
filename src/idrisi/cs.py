@@ -28,14 +28,14 @@ def river_extension(hmap, *, jr, vp, separate,
                  max(0, int(clipLength / separate)))
     
     if(coverage is not None):
-        landpoints = sum(1 for pID, pLevel in hmap._level.items() if pLevel is not None)
+        landpoints = sum(1 for pID, pLevel in enumerate(hmap._level) if pLevel is not None)
         cIters = max(1, int(landpoints / searchLevel / searchLevel / 4 * coverage))
         if maxIterations is None or maxIterations > cIters:
             maxIterations = cIters
 
     mStr = '' if maxIterations is None else f' of {maxIterations}'
     hmap.levelize()
-    targets = list(pID for pID, pLevel in hmap._level.items() if pLevel == searchLevel)
+    targets = list(pID for pID, pLevel in enumerate(hmap._level) if pLevel == searchLevel)
     iteration = 0
     while(targets and (maxIterations is None or iteration < maxIterations)):
         iteration += 1
@@ -43,7 +43,7 @@ def river_extension(hmap, *, jr, vp, separate,
         
         hmap.add_river_source(jr.choice(targets))
         hmap.levelize()
-        targets = list(pID for pID, pLevel in hmap._level.items() if pLevel == searchLevel)
+        targets = list(pID for pID, pLevel in enumerate(hmap._level) if pLevel == searchLevel)
     
     hmap.remove_river_stubs(clipLevel)
     hmap.levelize(shoreLevel=influenceLevel)
@@ -160,11 +160,14 @@ if __name__ == '__main__':
                                                           heightmap.HeightMapper._landcolors[bIdx]))
     
     landValues = [(None, 0.01, 0.03),
-                  (None, 0.01, 0.05),
-                  (None, 0.02, 0.20),
-                  (None, 0.03, 0.40),
-                  (None, 0.05, 0.70),
-                  (None, 0.10, 1.20)]
+                  (None, 0.02, 0.05),
+                  (None, 0.05, 0.20),
+                  (None, 0.10, 0.35),
+                  (None, 0.20, 0.70),
+                  (None, 0.35, 1.20),
+                  (None, 0.55, 1.20),
+                  (None, 0.75, 1.20),
+                  (None, 0.95, 1.20)]
     landWeights = jutil.make_array_interp(len(landValues), 1, maxRevisLevel)
     
         

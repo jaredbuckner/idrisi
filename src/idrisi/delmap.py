@@ -22,6 +22,9 @@ class DelMapper:
     def enumerate_points(self):
         yield from enumerate(self._grid.points)
 
+    def point_count(self):
+        return(len(self._grid.points))
+
     def adjacent_nodes(self, pID):
         yield from self._nindices[self._nindptr[pID]:self._nindptr[pID+1]]
 
