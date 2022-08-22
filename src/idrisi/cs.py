@@ -159,11 +159,20 @@ if __name__ == '__main__':
             return tuple(a * aWt + b * bWt for a,b in zip(heightmap.HeightMapper._landcolors[aIdx],
                                                           heightmap.HeightMapper._landcolors[bIdx]))
     
-    landValues = [(None, 0.01, 0.03),
+    #landValues = [(None, 0.01, 0.03),
+    #              (None, 0.02, 0.05),
+    #              (None, 0.05, 0.20),
+    #              (None, 0.10, 0.35),
+    #              (None, 0.20, 0.70),
+    #              (None, 0.35, 1.20),
+    #              (None, 0.55, 1.20),
+    #              (None, 0.75, 1.20),
+    #              (None, 0.95, 1.20)]
+    landValues = [(None, 0.01, 0.55),
                   (None, 0.02, 0.05),
                   (None, 0.05, 0.20),
-                  (None, 0.10, 0.35),
-                  (None, 0.20, 0.70),
+                  (None, 0.15, 0.35),
+                  (None, 0.25, 0.70),
                   (None, 0.35, 1.20),
                   (None, 0.55, 1.20),
                   (None, 0.75, 1.20),
