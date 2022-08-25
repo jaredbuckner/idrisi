@@ -74,7 +74,8 @@ if __name__ == '__main__':
                                       pMax = vp.grid_sel_max(),
                                       distsq = separate * separate))
     hmap = heightmap.HeightMapper(points, jr=jr)
-    hmap.forbid_long_edges(5 * separate)
+
+    hmap.forbid_long_edges(10*separate)
     
     pathIn = ((((14000, vp.grid_sel_max()[1]), None),),
               (((vp.grid_sel_max()[0], 14000), None),),
@@ -109,6 +110,19 @@ if __name__ == '__main__':
            16000 <= point[1]):
             hmap.set_fill_sea(pID)
 
+    ### DRAW SHORE EDGES
+    view = PIL.Image.new('RGB', vp.view_size())
+    hmap.draw_edges(view, grid2view_fn=vp.grid2view,
+                    edge_color_fn = lambda pID, qID: (hmap.level_color(pID, maxLevel=2),
+                                                      hmap.level_color(qID, maxLevel=2)))
+    for kPoint in kp:
+        kXY = tuple(int(p) for p in vp.grid2view(kPoint))
+        if(0 <= kXY[0] < vp.view_size()[0] and 0 <= kXY[1] < vp.view_size()[1]):
+            view.putpixel(kXY, levelmap.LevelMapper._errorColor)
+        
+    quickview(view, fname="out/cs.edges.png", keep=True)
+    ### END DRAW SHORE EDGES
+    
     vp.reset_grid_sel()
     
     hmap.levelize()
@@ -120,27 +134,27 @@ if __name__ == '__main__':
                     edge_color_fn = lambda pID, qID: (hmap.level_color(pID, maxLevel=maxshorelevel),
                                                       hmap.level_color(qID, maxLevel=maxshorelevel)))
 
-    if(0):
-        for kPoint in kp:
-            kXY = tuple(int(p) for p in vp.grid2view(kPoint))
-            if(0 <= kXY[0] < vp.view_size()[0] and 0 <= kXY[1] < vp.view_size()[1]):
-                view.putpixel(kXY, levelmap.LevelMapper._errorColor)
-        
     quickview(view, fname="out/cs.shore.png", keep=True)
     ### END DRAW SHORE LEVELS
     
+    #vp.reset_grid_sel()
+
     maxMajorLevel=river_extension(hmap, jr=jr, vp=vp, separate=separate,
-                                  searchLength=5000, viewStr="major",
-                                  maxIterations=200)
+                                  searchLength=1100, viewStr="major",
+                                  clipLength=3600, maxIterations=100)
     maxMinorLevel=river_extension(hmap, jr=jr, vp=vp, separate=separate,
-                                  searchLength=1500, viewStr="minor",
-                                  influenceLength=500,
-                                  maxIterations=800)
+                                  searchLength=1100, viewStr="minor",
+                                  clipLength=2400, maxIterations=100)
+    maxRevisLevel=river_extension(hmap, jr=jr, vp=vp, separate=separate,
+                                  searchLength=1100, viewStr="revis",
+                                  clipLength=1200, maxIterations=100,
+                                  influenceLength=500)
+
 
     drains = hmap.gen_drain_levels()
     print(f"Max draining:  {max(drains.values())}")
 
-    maxRevisLevel = maxMinorLevel
+    #maxRevisLevel = maxMinorLevel
     #maxRevisLevel = river_extension(hmap, jr=jr, vp=vp, separate=separate,
     #                                searchLength=350, influenceLength=500, viewStr="Revis",
     #                                coverage=0.50,
@@ -168,33 +182,48 @@ if __name__ == '__main__':
     #              (None, 0.55, 1.20),
     #              (None, 0.75, 1.20),
     #              (None, 0.95, 1.20)]
-    landValues = [(None, 0.01, 0.55),
-                  (None, 0.02, 0.05),
-                  (None, 0.05, 0.20),
-                  (None, 0.15, 0.35),
-                  (None, 0.25, 0.70),
-                  (None, 0.35, 1.20),
-                  (None, 0.55, 1.20),
-                  (None, 0.75, 1.20),
-                  (None, 0.95, 1.20)]
+    landValues = [(0.01, 0.55),
+                  (0.01, 0.05),
+                  (0.05, 0.20),
+                  (0.15, 0.35),
+                  (0.25, 0.70),
+                  (0.35, 1.20),
+                  (0.55, 1.20),
+                  (0.75, 1.20),
+                  (0.95, 1.20)]
     landWeights = jutil.make_array_interp(len(landValues), 1, maxRevisLevel)
     
         
-    def minmaxslope(pLevel, pID):
-        if pLevel is None:
-            return(-40, 0.0, 2.0)
+    def minmaxslope(hmap, pID):
+        pLevel = hmap.level(pID)
+        if pLevel is None or pLevel is False:
+            return(0.0, 2.0)
 
         if pLevel <= 0:            
             if pID in drains:
                 dmag = drains[pID]
-                return(None, 0.01 / dmag, 0.05 / dmag)
+                return(0.02 / dmag, 0.10 / dmag)
 
-            return(None, 0.01, 0.05)
+            return(0.02, 0.10)
 
         aID, aW, bID, bW = landWeights(pLevel)
         return tuple(a * aW + b * bW if a is not None and b is not None else None for a, b in zip(landValues[aID], landValues[bID]))
 
-    hmap.gen_heights(minmaxslope, sea_height=-40, maxHeight=984)
+    relax = 1
+    while True:
+        print(f"I am relaxed:  {relax}")
+        
+        def mms(*args):
+            n, x = minmaxslope(*args)
+            return(n / relax, x)
+        
+        try:            
+            hmap.gen_heights(mms, sea_height=-40, maxHeight=984, selectRange=(0.2, 0.8))
+            break
+        except RuntimeError as e:
+            print(e)
+            relax *= 1.5
+    
     
     if(1):
         widthatsource = 10

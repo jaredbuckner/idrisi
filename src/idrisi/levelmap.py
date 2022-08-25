@@ -51,8 +51,11 @@ class LevelMapper(delmap.DelMapper):
     def level(self, pID):
         return(self._level[pID])
 
-    def levels(self):
+    def enumerate_levels(self):
         yield from enumerate(self._level)
+
+    def level_count(self):
+        return(len(self._levels))
     
     def is_edge_forbidden(self, aPID, bPID):
         return(((aPID, bPID) if aPID < bPID else (bPID, aPID)) in self._forbiddenEdges)
@@ -255,18 +258,20 @@ class LevelMapper(delmap.DelMapper):
         ## Look for forks, mark for deletion
         toDelete = set()
         for pID, pLevel in enumerate(self._level):
-            if pLevel is not None and pLevel < 0:
+            if pLevel is None or pLevel is False or pLevel < 0:
                 longInBranches = list()
                 shortInBranches = list()
                 
                 for qID in self.neighbors(pID):
                     qLevel = self._level[qID]
-                    if qLevel is not None and pLevel < qLevel < 1:
+                    if (qLevel is not None and
+                        (pLevel is None or pLevel is False or pLevel < qLevel) and
+                        qLevel < 1):
                         if -qLevel < minLength:
                             shortInBranches.append(qID)
                         else:
                             longInBranches.append(qID)
-                if(longInBranches):
+                if(pLevel is None or pLevel is False or longInBranches):
                     toDelete.update(shortInBranches)
                 else:
                     toDelete.update(shortInBranches[1:])
@@ -278,7 +283,7 @@ class LevelMapper(delmap.DelMapper):
             self._level[pID] = False
             for qID in self.neighbors(pID):
                 qLevel = self._level[qID]
-                if(qLevel is not None and pLevel < qLevel < 1):
+                if(qLevel is not None and qLevel is not False and pLevel < qLevel < 1):
                     toDelete.add(qID)
 
     def level_color(self, pID, *, maxLevel=1):
