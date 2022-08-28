@@ -218,7 +218,7 @@ if __name__ == '__main__':
             return(n / relax, x)
         
         try:            
-            hmap.gen_heights(mms, sea_height=-40, maxHeight=984, selectRange=(0.2, 0.8))
+            hmap.gen_heights(mms, sea_height=-40, maxHeight=984, selectRange=(0.5, 0.7))
             break
         except RuntimeError as e:
             print(e)
