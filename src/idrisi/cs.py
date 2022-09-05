@@ -179,7 +179,7 @@ if __name__ == '__main__':
     #              (None, 0.10, 0.35),
     #              (None, 0.20, 0.70),
     #              (None, 0.35, 1.20),
-    #              (None, 0.55, 1.20),
+d    #              (None, 0.55, 1.20),
     #              (None, 0.75, 1.20),
     #              (None, 0.95, 1.20)]
     landValues = [(0.01, 0.55),
@@ -189,15 +189,20 @@ if __name__ == '__main__':
                   (0.25, 0.70),
                   (0.35, 1.20),
                   (0.55, 1.20),
+
                   (0.75, 1.20),
-                  (0.95, 1.20)]
+                  (0.75, 1.20),
+                  (0.75, 1.20),
+
+                  (0.95, 1.20)
+                  ]
     landWeights = jutil.make_array_interp(len(landValues), 1, maxRevisLevel)
     
         
     def minmaxslope(hmap, pID):
         pLevel = hmap.level(pID)
         if pLevel is None or pLevel is False:
-            return(0.0, 2.0)
+            return(0.0, 0.55)
 
         if pLevel <= 0:            
             if pID in drains:
