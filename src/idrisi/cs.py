@@ -17,36 +17,37 @@ def quickview(view, fname="cs.png", keep=False):
     return
 
 def river_extension(hmap, *, jr, vp, separate,
-                    searchLength, influenceLength=0,
-                    clipLength=None,
-                    viewStr, maxIterations=None,
-                    coverage=None):
-    searchLevel    = max(int(searchLength / separate), 1)
-    influenceLevel = max(int(influenceLength / separate), 1)
-
-    clipLevel = (searchLevel - 1 if clipLength is None else
-                 max(0, int(clipLength / separate)))
+                    riverSegmentLength,
+                    minRiverLength = None,
+                    seaShoreOffsetMin = 0, seaShoreOffsetMax = 0,
+                    riverShoreOffsetMin = 0, riverShoreOffsetMax = 0,
+                    viewStr, maxIterations=None):
+    riverSearchLevel = max(int(riverSegmentLength / separate), 1)
+    riverClipLevel  = None if minRiverLength is None else max(int(minRiverLength / separate), 1)
+    seaShoreMin     = max(int(seaShoreOffsetMin / separate), 1)
+    seaShoreMax     = max(int(seaShoreOffsetMax / separate), 1)
+    riverShoreMin   = max(int(riverShoreOffsetMin / separate), 1)
+    riverShoreMax   = max(int(riverShoreOffsetMax / separate), 1)
     
-    if(coverage is not None):
-        landpoints = sum(1 for pID, pLevel in enumerate(hmap._level) if pLevel is not None)
-        cIters = max(1, int(landpoints / searchLevel / searchLevel / 4 * coverage))
-        if maxIterations is None or maxIterations > cIters:
-            maxIterations = cIters
-
     mStr = '' if maxIterations is None else f' of {maxIterations}'
     hmap.levelize()
-    targets = list(pID for pID, pLevel in enumerate(hmap._level) if pLevel == searchLevel)
+    
+    targets = list(pID for pID, pLevel in hmap.enumerate_levels() if pLevel == riverSearchLevel)
     iteration = 0
+    
     while(targets and (maxIterations is None or iteration < maxIterations)):
         iteration += 1
         print (f"{viewStr}{iteration}{mStr}")
         
         hmap.add_river_source(jr.choice(targets))
         hmap.levelize()
-        targets = list(pID for pID, pLevel in enumerate(hmap._level) if pLevel == searchLevel)
-    
-    hmap.remove_river_stubs(clipLevel)
-    hmap.levelize(shoreLevel=influenceLevel)
+        targets = list(pID for pID, pLevel in hmap.enumerate_levels() if pLevel == riverSearchLevel)
+
+    if(riverClipLevel is not None):
+        hmap.remove_river_stubs(riverClipLevel)
+        
+    hmap.levelize(seaShoreMin=seaShoreMin, seaShoreMax=seaShoreMax,
+                  riverShoreMin=riverShoreMin, riverShoreMax=riverShoreMax)
     
     maxLevel = hmap.max_level()
     
@@ -66,6 +67,7 @@ if __name__ == '__main__':
     vp = jutil.Viewport(gridSize = (18000, 18000),
                         viewSize = (1200, 1200))
     separate = 53
+    #separate = 533
     
     # Create land beyond the outer rim by another 2km on each side
     vp.set_grid_sel((-2000, -2000), (20000, 20000))
@@ -139,26 +141,21 @@ if __name__ == '__main__':
     
     #vp.reset_grid_sel()
 
-    maxMajorLevel=river_extension(hmap, jr=jr, vp=vp, separate=separate,
-                                  searchLength=1100, viewStr="major",
-                                  clipLength=3600, maxIterations=100)
-    maxMinorLevel=river_extension(hmap, jr=jr, vp=vp, separate=separate,
-                                  searchLength=1100, viewStr="minor",
-                                  clipLength=2400, maxIterations=100)
-    maxRevisLevel=river_extension(hmap, jr=jr, vp=vp, separate=separate,
-                                  searchLength=1100, viewStr="revis",
-                                  clipLength=1200, maxIterations=100,
-                                  influenceLength=500)
+    maxMajorLevel=river_extension(hmap, jr=jr, vp=vp, separate=separate, viewStr="major",
+                                  riverSegmentLength=1100, minRiverLength=3600,
+                                  maxIterations=100)
+    maxMinorLevel=river_extension(hmap, jr=jr, vp=vp, separate=separate, viewStr="minor",
+                                  riverSegmentLength=1100, minRiverLength=2400,
+                                  maxIterations=100)
+    maxRevisLevel=river_extension(hmap, jr=jr, vp=vp, separate=separate, viewStr="revis",
+                                  riverSegmentLength=1100, minRiverLength=2400,
+                                  seaShoreOffsetMin=600, seaShoreOffsetMax=1800,
+                                  riverShoreOffsetMax=2400,
+                                  maxIterations=100)
 
 
     drains = hmap.gen_drain_levels()
     print(f"Max draining:  {max(drains.values())}")
-
-    #maxRevisLevel = maxMinorLevel
-    #maxRevisLevel = river_extension(hmap, jr=jr, vp=vp, separate=separate,
-    #                                searchLength=350, influenceLength=500, viewStr="Revis",
-    #                                coverage=0.50,
-    #                                maxIterations=100)
     
     seasinterp = jutil.make_array_interp(len(heightmap.HeightMapper._seacolors), -40, 0)
     landinterp = jutil.make_array_interp(len(heightmap.HeightMapper._landcolors), 0, 984)
@@ -179,7 +176,7 @@ if __name__ == '__main__':
     #              (None, 0.10, 0.35),
     #              (None, 0.20, 0.70),
     #              (None, 0.35, 1.20),
-d    #              (None, 0.55, 1.20),
+    #              (None, 0.55, 1.20),
     #              (None, 0.75, 1.20),
     #              (None, 0.95, 1.20)]
     landValues = [(0.01, 0.55),
@@ -232,14 +229,17 @@ d    #              (None, 0.55, 1.20),
     
     if(1):
         widthatsource = 10
-        riverbeds = set()
-        riversize = hmap.gen_drain_levels()
-        for rID, rSize in riversize.items():
-            riverbeds.update(hmap.community(rID, widthatsource * rSize).keys())
+        riverbeds = dict()
+        for rID, rSize in drains.items():
+            wfactor = jr.uniform(0.5, 1.5)
+            dfactor = 1.0 / wfactor
+            for bID in (rID, *hmap.community(rID, widthatsource * rSize * wfactor)):
+                if bID not in riverbeds or riverbeds[bID] < dfactor:
+                    riverbeds[bID] = dfactor
 
-        for rID in riverbeds:
+        for rID, dfactor in riverbeds.items():
             rHeight = hmap._height[rID]
-            rDepth = 15
+            rDepth = 15 * dfactor
 
             hmap._height[rID] -= (rDepth if rHeight >= 0 else
                                   (40 + rHeight) / 40 * rDepth if rHeight >= -40 else

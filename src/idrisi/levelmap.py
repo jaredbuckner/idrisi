@@ -176,25 +176,33 @@ class LevelMapper(delmap.DelMapper):
 
         return ml
 
-    def _level_from_neighbors(self, pID, *, shoreLevel=1):
+    def _level_from_neighbors(self, pID, *,
+                              seaShoreMin=1, seaShoreMax=1,
+                              riverShoreMin=1, riverShoreMax=1):
+        
         nLevel = None
+        seaSpan = seaShoreMax - seaShoreMin + 1
+        riverSpan = riverShoreMax - riverShoreMin + 1
         
         for qID in self.neighbors(pID):
             qLevel = self._level[qID]
             if qLevel is False:
                 continue
             if(qLevel is None):
-                if nLevel is None or nLevel >= shoreLevel:
-                    nLevel = shoreLevel - 1
+                seaLevel = qID % seaSpan + seaShoreMin - 1
+                if nLevel is None or nLevel > seaLevel:
+                    nLevel = seaLevel
             elif(qLevel <= 0):
-                return(1)
+                riverLevel = qID % riverSpan + riverShoreMin - 1
+                if nLevel is None or nLevel > riverLevel:
+                    nLevel = riverLevel
             else:
                 if nLevel is None or nLevel > qLevel:
                     nLevel = qLevel
 
         return nLevel if nLevel is None else nLevel + 1
         
-    def is_valid_level(self, pID, *, shoreLevel=1):
+    def is_valid_level(self, pID, **kwargs):
         ## Check a point and return True if the level value for this point
         ## exists and obeys all rules, False otherwise
         
@@ -215,24 +223,24 @@ class LevelMapper(delmap.DelMapper):
         
         ## Non-shore land must be one level one higher than its lowest neighbor
         ##
-        pOughtToBe = self._level_from_neighbors(pID, shoreLevel=shoreLevel)
+        pOughtToBe = self._level_from_neighbors(pID, **kwargs)
         return pOughtToBe is not None and pOughtToBe == pLevel
 
-    def levelizables(self, *, shoreLevel=1):
+    def levelizables(self, **kwargs):
         yield from (pID for pID, pPoint in self.enumerate_points() if
-                    not self.is_valid_level(pID, shoreLevel=shoreLevel) and
-                    any(self.is_valid_level(qID, shoreLevel=shoreLevel) for qID in self.neighbors(pID)))    
+                    not self.is_valid_level(pID, **kwargs) and
+                    any(self.is_valid_level(qID, **kwargs) for qID in self.neighbors(pID)))    
         
-    def levelize(self, *, shoreLevel=1):
-        invalids = set(self.levelizables(shoreLevel=shoreLevel))
+    def levelize(self, **kwargs):
+        invalids = set(self.levelizables(**kwargs))
         
         while(invalids):
             pID = invalids.pop()
-            pLevel = self._level_from_neighbors(pID, shoreLevel=shoreLevel)
+            pLevel = self._level_from_neighbors(pID, **kwargs)
             if(pLevel is not None):
                 self._level[pID] = pLevel
                 for qID in self.neighbors(pID):
-                    if(not self.is_valid_level(qID, shoreLevel=shoreLevel)):
+                    if(not self.is_valid_level(qID, **kwargs)):
                         invalids.add(qID)
 
         
@@ -528,7 +536,7 @@ class _ut_LevelMapper(unittest.TestCase):
         lmap.remove_river_stubs(12)
         
         for shoreLevel in (1, 5, 1):
-            lmap.levelize(shoreLevel=shoreLevel)
+            lmap.levelize(seaShoreMax=shoreLevel)
 
             ml = lmap.max_level()
             if ml is None or ml is False:
