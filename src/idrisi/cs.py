@@ -88,8 +88,8 @@ if __name__ == '__main__':
     jr = jrandom.JRandom()
     vp = jutil.Viewport(gridSize = (18000, 18000),
                         viewSize = (1200, 1200))
-    separate = 37
-    #separate = 53
+    #separate = 37
+    separate = 53
     #separate = 233
     
     # Create land beyond the outer rim by another 2km on each side
@@ -130,6 +130,7 @@ if __name__ == '__main__':
         p1, dummy = beth
         kp.extend(jr.koch2_path(p0, p1, separate * separate / 100.0,
                                 #fixedR=1/4,
+                                canSkew=True,
                                 leanLeft = leanLeft))
 
     kp.append(path[-1][0])

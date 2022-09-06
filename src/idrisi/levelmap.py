@@ -189,11 +189,11 @@ class LevelMapper(delmap.DelMapper):
             if qLevel is False:
                 continue
             if(qLevel is None):
-                seaLevel = qID % seaSpan + seaShoreMin - 1
+                seaLevel = pID % seaSpan + seaShoreMin - 1
                 if nLevel is None or nLevel > seaLevel:
                     nLevel = seaLevel
             elif(qLevel <= 0):
-                riverLevel = qID % riverSpan + riverShoreMin - 1
+                riverLevel = pID % riverSpan + riverShoreMin - 1
                 if nLevel is None or nLevel > riverLevel:
                     nLevel = riverLevel
             else:

@@ -102,10 +102,15 @@ class JRandom(random.Random):
             yield from self.koch_path(pMid, pTo, maxStepSq, bendFactor)
 
     
-    def koch2_path(self, pFrom, pTo, maxStepSq, *, fixedR=None, leanLeft=None, leanRecurse=False):
+    def koch2_path(self, pFrom, pTo, maxStepSq, *, fixedR=None, rangeR=(1/5, 1/3),
+                   canSkew=False, leanLeft=None, leanRecurse=False):
         '''Generate points from pFrom to pTo, no farther apart than
-        math.sqrt(maxStepSq) If a fixedR is given it should be betweeon 1/5 (a
-        straight line) and 1/3 (a step function)
+        math.sqrt(maxStepSq). If a fixedR is given it should be betweeon 1/5 (a
+        straight line) and 1/3 (a step function).  If no fixedR is given,
+        rangeR is used as boundaries for random.uniform() to pick between.
+
+        If canSkew is true, each shape can be asymmetrical -- this will only
+        work if fixedR is None.
         
         If leanLeft is None, each shape leans in a random behavor.  If True,
         the first fractalization leans leftward. If False, the first
@@ -120,24 +125,30 @@ class JRandom(random.Random):
         if pDel[0]*pDel[0] + pDel[1]*pDel[1] <= maxStepSq:
             yield pFrom
         else:            
-            r = self.uniform(1/5, 1/3) if fixedR is None else fixedR
-            x = 1/2 - 3/2 * r
-            ysq = max(0, -r*r*5/4 + r*3/2 - 1/4)
-            y = math.sqrt(ysq)
+            rEarly = self.uniform(rangeR[0], rangeR[1]) if fixedR is None else fixedR
+            rLate = self.uniform(rangeR[0], rangeR[1]) if fixedR is None else fixedR
+            xEarly = 1/2 - 3/2 * rEarly
+            xLate = 1/2 - 3/2 * rLate
+            yEarlySq = max(0, -rEarly*rEarly*5/4 + rEarly*3/2 - 1/4)
+            yEarly = math.sqrt(yEarlySq)
+            yLateSq = max(0, -rLate*rLate*5/4 + rLate*3/2 - 1/4)
+            yLate = math.sqrt(yLateSq)
             lean = self.choice((True, False)) if leanLeft is None else leanLeft
             nextLeanLeft = None if leanLeft is None or leanRecurse is False else leanLeft
             nextLeanRight = None if leanLeft is None or leanRecurse is False else not leanLeft
-            pOrtho = (y * pDel[1], y * -pDel[0]) if lean else (y * -pDel[1], y * pDel[0])
+            pOrthoEarly = (yEarly * pDel[1], yEarly * -pDel[0]) if lean else (yEarly * -pDel[1], yEarly * pDel[0])
+            pOrthoLate = (yLate * pDel[1], yLate * -pDel[0]) if lean else (yLate * -pDel[1], yLate * pDel[0])
             
-            pAlfa = (pFrom[0] + r * pDel[0],
-                     pFrom[1] + r * pDel[1])
-            pBrav = (pFrom[0] + (r+x) * pDel[0] + pOrtho[0],
-                     pFrom[1] + (r+x) * pDel[1] + pOrtho[1])
-            pChar = (pFrom[0] + (r+r+x) * pDel[0] + pOrtho[0],
-                     pFrom[1] + (r+r+x) * pDel[1] + pOrtho[1])
-            pDelt = (pFrom[0] + (r+r+x+x) * pDel[0],
-                     pFrom[1] + (r+r+x+x) * pDel[1])
-            yield from self.koch2_path(pFrom, pAlfa, maxStepSq, fixedR=fixedR, leanLeft=nextLeanLeft, leanRecurse=leanRecurse)
+            pAlfa = (pFrom[0] + rEarly * pDel[0],
+                     pFrom[1] + rEarly * pDel[1])
+            pBrav = (pFrom[0] + (rEarly+xEarly) * pDel[0] + pOrthoEarly[0],
+                     pFrom[1] + (rEarly+xEarly) * pDel[1] + pOrthoEarly[1])
+            pChar = (pFrom[0] + (rLate+rLate+xLate) * pDel[0] + pOrthoLate[0],
+                     pFrom[1] + (rLate+rLate+xLate) * pDel[1] + pOrthoLate[1])
+            pDelt = (pFrom[0] + (rLate+rLate+xLate+xLate) * pDel[0],
+                     pFrom[1] + (rLate+rLate+xLate+xLate) * pDel[1])
+            
+            yield from self.koch2_path(pFrom, pAlfa, maxStepSq, fixedR=fixedR, rangeR=rangeR, canSkew=canSkew, leanLeft=nextLeanLeft, leanRecurse=leanRecurse)
             yield from self.koch2_path(pAlfa, pBrav, maxStepSq, fixedR=fixedR, leanLeft=nextLeanRight, leanRecurse=leanRecurse)
             yield from self.koch2_path(pBrav, pChar, maxStepSq, fixedR=fixedR, leanLeft=nextLeanLeft, leanRecurse=leanRecurse)
             yield from self.koch2_path(pChar, pDelt, maxStepSq, fixedR=fixedR, leanLeft=nextLeanRight, leanRecurse=leanRecurse)
