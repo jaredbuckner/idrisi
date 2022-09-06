@@ -152,7 +152,13 @@ class _ut_DelMapper(unittest.TestCase):
         points = list(self.jr.punctillate_rect(pMin = self.vp.grid_sel_min(),
                                                pMax = self.vp.grid_sel_max(),
                                                distsq = self.separate * self.separate))
-        return DelMapper(points)
+        dmap = DelMapper(points)
+
+        for pID in range(dmap.point_count()):
+            qCnt = sum(1 for qID in dmap.adjacent_nodes(pID))
+            self.assertGreater(qCnt, 1)
+
+        return(dmap)
         
     def test_random_nodes(self):
         self.vp.zoom_grid_sel(1.1);

@@ -249,15 +249,17 @@ class LevelMapper(delmap.DelMapper):
         river = list()
         while(pLevel is not None and pLevel > -len(river)):
             river.append(pID)
+            
+            lowID = None
+            lowLevel = None
             for qID in self.neighbors(pID):
-                qLevel = self._level[qID]
-                if qLevel is None:
-                    pID = qID
-                    pLevel = None
-                    break
-                if qLevel < pLevel:
-                    pLevel = qLevel
-                    pID = qID
+                qLevel = self.level(qID)
+                if self.is_lower(pLevel, qLevel) and (lowID is None or self.is_lower(lowLevel, qLevel)):
+                    lowID = qID
+                    lowLevel = qLevel
+
+            pID = lowID
+            pLevel = lowLevel
 
         for negLevel, pID in enumerate(river):
             self._level[pID] = -negLevel
@@ -330,19 +332,21 @@ class LevelMapper(delmap.DelMapper):
     def gen_drain_levels(self):
         drains = dict()
 
-        for pID, pLevel in enumerate(self._level):
+        for pID, pLevel in enumerate(self._level):            
             if pLevel == 0:
-                while(pID is not None):
-                    drains[pID] = 1 + drains.get(pID, 0)
+                streamsIn = {pID: pLevel}
+                streamsOut = set()
+                while(streamsIn):
+                    pID, pLevel = streamsIn.popitem()
+                    streamsOut.add(pID)
                     for qID in self.neighbors(pID):
                         qLevel = self._level[qID]
-                        if qLevel is None or qLevel is False:
-                            pID = None
-                            break
-                        if qLevel < pLevel:                            
-                            pID = qID
-                            pLevel = qLevel
+                        if qLevel is not None and qLevel is not False and self.is_lower(pLevel, qLevel):
+                            streamsIn[qID] = qLevel
 
+                for pID in streamsOut:
+                    drains[pID] = drains.get(pID, 0) + 1
+                    
         return drains                    
                 
 class _ut_LevelMapper(unittest.TestCase):
@@ -542,13 +546,53 @@ class _ut_LevelMapper(unittest.TestCase):
             if ml is None or ml is False:
                 ml = 0
 
-            view = PIL.Image.new('RGB', self.vp.view_size())
-            lmap.draw_edges(view, grid2view_fn=self.vp.grid2view,
-                            edge_color_fn = lambda pID, qID: (lmap.level_color(pID, maxLevel=ml),
-                                                              lmap.level_color(qID, maxLevel=ml)))
-            self.quickview(view)
+            ## Super simple drains mechanism
+            drains = lmap.gen_drain_levels()
+            print(drains)
+            maxDrains = max(l for pID, l in drains.items())
+            drInterp = jutil.make_linear_interp(0, maxDrains)
+            def drColor(dr):
+                aW, bW = drInterp(dr)
+                return (92 * aW + 255 * bW, 127 * aW + 255 * bW, 0.0)
 
-    
+            minRiver = min(r for PID, r in lmap.enumerate_levels() if r is not False and r is not None)
+            rvInterp = jutil.make_linear_interp(minRiver, 1)
+            def rvColor(level):
+                aW, bW = rvInterp(level)
+                return(92 * aW + 255 * bW, 127 * aW + 255 * bW, 0.0)
+
+            def colorize(pID, qID, isRV):
+                pDRV = None
+                qDRV = None
+
+                pLevel = lmap.level(pID)
+                qLevel = lmap.level(qID)
+
+                if not isRV:
+                    if pID in drains:
+                        pDRV = drColor(drains[pID])
+                    if qID in drains:
+                        qDRV = drColor(drains[qID])                    
+                else:
+                    if pLevel is not None and pLevel <= 0:
+                        pDRV = rvColor(pLevel)
+                    if qLevel is not None and qLevel <= 0:
+                        qDRV = rvColor(qLevel)
+
+                if pDRV is not None and qDRV is not None:
+                    return(pDRV, qDRV)
+
+                else:
+                    return (lmap.level_color(pID, maxLevel=ml),
+                            lmap.level_color(qID, maxLevel=ml))
+            ## End drains setup...
+            
+            for isRV in (False, True):
+                view = PIL.Image.new('RGB', self.vp.view_size())
+                lmap.draw_edges(view, grid2view_fn=self.vp.grid2view,
+                                edge_color_fn = lambda pID, qID: colorize(pID, qID, isRV))
+                self.quickview(view)
+
     
     def test_alternate_start(self):
         self.separate = 7

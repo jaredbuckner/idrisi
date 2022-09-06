@@ -44,11 +44,12 @@ def river_extension(hmap, *, jr, vp, separate,
         targets = list(pID for pID, pLevel in hmap.enumerate_levels() if pLevel == riverSearchLevel)
 
     if(riverClipLevel is not None):
+        pass
         hmap.remove_river_stubs(riverClipLevel)
         
     hmap.levelize(seaShoreMin=seaShoreMin, seaShoreMax=seaShoreMax,
                   riverShoreMin=riverShoreMin, riverShoreMax=riverShoreMax)
-    
+
     maxLevel = hmap.max_level()
     
     ## DRAW MAJOR RIVER LEVELS
@@ -59,6 +60,27 @@ def river_extension(hmap, *, jr, vp, separate,
     quickview(view, fname=f"out/cs.{viewStr}.png", keep=True)
     ### END DRAW MAJOR RIVER LEVELS
 
+    for pID, pLevel in hmap.enumerate_levels():
+        if pLevel is None or pLevel > 0:
+            continue
+
+        above = list()
+        at = list()
+        below = list()
+
+        for qID in hmap.neighbors(pID):
+            qLevel = hmap.level(qID)
+            if qLevel is None or qLevel < pLevel:
+                below.append(qLevel)
+            elif qLevel > pLevel:
+                above.append(qLevel)
+            else:
+                at.append(qLevel)
+
+        if((pLevel != 0 and not above) or not below):
+            print(f"{pLevel} => A:{above!r} @:{at!r} B:{below!r}")
+            raise(RuntimeError("A river is shady!"))
+    
     return maxLevel
 
 if __name__ == '__main__':
@@ -66,8 +88,9 @@ if __name__ == '__main__':
     jr = jrandom.JRandom()
     vp = jutil.Viewport(gridSize = (18000, 18000),
                         viewSize = (1200, 1200))
-    separate = 53
-    #separate = 533
+    separate = 37
+    #separate = 53
+    #separate = 233
     
     # Create land beyond the outer rim by another 2km on each side
     vp.set_grid_sel((-2000, -2000), (20000, 20000))
@@ -78,6 +101,11 @@ if __name__ == '__main__':
     hmap = heightmap.HeightMapper(points, jr=jr)
 
     hmap.forbid_long_edges(10*separate)
+
+    for pID in range(hmap.point_count()):
+        qCnt = sum(1 for qID in hmap.neighbors(pID))
+        if(qCnt < 2):
+            raise(RuntimeError(f"Somehow {pID=} has {qCnt} neighbors!"))
     
     pathIn = ((((14000, vp.grid_sel_max()[1]), None),),
               (((vp.grid_sel_max()[0], 14000), None),),
@@ -143,20 +171,39 @@ if __name__ == '__main__':
 
     maxMajorLevel=river_extension(hmap, jr=jr, vp=vp, separate=separate, viewStr="major",
                                   riverSegmentLength=1100, minRiverLength=3600,
-                                  maxIterations=100)
+                                  maxIterations=200)
     maxMinorLevel=river_extension(hmap, jr=jr, vp=vp, separate=separate, viewStr="minor",
                                   riverSegmentLength=1100, minRiverLength=2400,
-                                  maxIterations=100)
+                                  maxIterations=200)
     maxRevisLevel=river_extension(hmap, jr=jr, vp=vp, separate=separate, viewStr="revis",
                                   riverSegmentLength=1100, minRiverLength=2400,
-                                  seaShoreOffsetMin=600, seaShoreOffsetMax=1800,
+                                  seaShoreOffsetMin=300, seaShoreOffsetMax=1800,
                                   riverShoreOffsetMax=2400,
-                                  maxIterations=100)
+                                  maxIterations=200)
 
 
     drains = hmap.gen_drain_levels()
+    
+    for pID, pLevel in hmap.enumerate_levels():
+        if pLevel is not None and pLevel is not False and pLevel == 0:
+            for qID in hmap.neighbors(pID):
+                qLevel = hmap.level(qID)
+                if(qLevel is None or qLevel is not False and qLevel < 0):
+                    break
+            else:
+                print(f"Warning!  Orphaned source!")
+        
+        if pID in drains:
+            if pLevel is None or pLevel is False or pLevel > 0:
+                print(f"Warning!  Drain point has a non-river level of {pLevel!r}")
+        else:
+            if pLevel is not None and pLevel is not False and pLevel <= 0:
+                print(f"Warning!  River point with level {pLevel!r} is not in the drain list")
+                drains[pID] = 1
+        
     print(f"Max draining:  {max(drains.values())}")
     
+                      
     seasinterp = jutil.make_array_interp(len(heightmap.HeightMapper._seacolors), -40, 0)
     landinterp = jutil.make_array_interp(len(heightmap.HeightMapper._landcolors), 0, 984)
     
@@ -221,11 +268,11 @@ if __name__ == '__main__':
         
         try:            
             hmap.gen_heights(mms, sea_height=-40, maxHeight=984, selectRange=(0.5, 0.7))
+            print(f"Final relaxation:  {relax}")
             break
         except RuntimeError as e:
             print(e)
             relax *= 1.5
-    
     
     if(1):
         widthatsource = 10
