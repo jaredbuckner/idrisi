@@ -164,21 +164,31 @@ class LevelMapper(delmap.DelMapper):
                (qLevel is None or
                 (qLevel is not None and qLevel < pLevel)));
     
-    def max_level(self):
-        ## Returns False if no level has been set,
-        ##         None if only sea levels have been set, or
-        ##         the max level value found
-        ml = False
-        
-        for pID, level in enumerate(self._level):
-            if (ml is False or ml is None or (level is not False and level is not None and level > ml)):
-                ml = level
+    def min_level(self):
+        return self.min_max_level()[0]
 
-        return ml
+    def max_level(self):
+        return self.min_max_level()[1]
+
+    def min_max_level(self):
+        ## Returns (False,False) if no level has been set,
+        ##         (None,None) if only sea levels have been set, or
+        ##         the (man, max) level value found
+        nl=False
+        xl=False
+
+        for pID, level in enumerate(self._level):
+            if(nl is False or nl is None or (level is not False and level is not None and level < nl)):
+                nl = level
+            if(xl is False or xl is None or (level is not False and level is not None and level > xl)):
+                xl = level
+
+        return(nl, xl)
 
     def _level_from_neighbors(self, pID, *,
                               seaShoreMin=1, seaShoreMax=1,
-                              riverShoreMin=1, riverShoreMax=1):
+                              riverShoreMin=1, riverShoreMax=1,
+                              riverLiftFn=lambda i:0):
         
         nLevel = None
         seaSpan = seaShoreMax - seaShoreMin + 1
@@ -193,7 +203,7 @@ class LevelMapper(delmap.DelMapper):
                 if nLevel is None or nLevel > seaLevel:
                     nLevel = seaLevel
             elif(qLevel <= 0):
-                riverLevel = pID % riverSpan + riverShoreMin - 1
+                riverLevel = riverLiftFn(qLevel) + pID % riverSpan + riverShoreMin - 1
                 if nLevel is None or nLevel > riverLevel:
                     nLevel = riverLevel
             else:
@@ -489,10 +499,13 @@ class _ut_LevelMapper(unittest.TestCase):
         for pID, qID in lmap.convex_hull_edges():
             lmap.set_fill_sea(pID)
 
-        lmap.levelize()
-        ml = lmap.max_level()
+        lmap.levelize()        
+        nl, ml = lmap.min_max_level()
+        if nl is None or nl is False:
+            nl = 0
         if ml is None or ml is False:
             ml = 0
+
             
         view = PIL.Image.new('RGB', self.vp.view_size())
         lmap.draw_edges(view, grid2view_fn=self.vp.grid2view,
@@ -548,7 +561,7 @@ class _ut_LevelMapper(unittest.TestCase):
 
             ## Super simple drains mechanism
             drains = lmap.gen_drain_levels()
-            print(drains)
+            #print(drains)
             maxDrains = max(l for pID, l in drains.items())
             drInterp = jutil.make_linear_interp(0, maxDrains)
             def drColor(dr):

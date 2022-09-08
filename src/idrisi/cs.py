@@ -21,6 +21,7 @@ def river_extension(hmap, *, jr, vp, separate,
                     minRiverLength = None,
                     seaShoreOffsetMin = 0, seaShoreOffsetMax = 0,
                     riverShoreOffsetMin = 0, riverShoreOffsetMax = 0,
+                    riverShoreSqueeze = 0,
                     viewStr, maxIterations=None):
     riverSearchLevel = max(int(riverSegmentLength / separate), 1)
     riverClipLevel  = None if minRiverLength is None else max(int(minRiverLength / separate), 1)
@@ -46,9 +47,18 @@ def river_extension(hmap, *, jr, vp, separate,
     if(riverClipLevel is not None):
         pass
         hmap.remove_river_stubs(riverClipLevel)
-        
+
+    minLevel = hmap.min_level()
+    squeezeLevels = int(riverShoreSqueeze / separate)
+    if squeezeLevels > 0:
+        wtFn = jutil.make_linear_interp(minLevel, 0)
+        squeezeFn = lambda i: int(wtFn(i)[1] * squeezeLevels + 0.5)
+    else:
+        squeezeFn = lambda i: 0
+    
+    
     hmap.levelize(seaShoreMin=seaShoreMin, seaShoreMax=seaShoreMax,
-                  riverShoreMin=riverShoreMin, riverShoreMax=riverShoreMax)
+                  riverShoreMin=riverShoreMin, riverShoreMax=riverShoreMax, riverLiftFn=squeezeFn)
 
     maxLevel = hmap.max_level()
     
@@ -90,6 +100,7 @@ if __name__ == '__main__':
                         viewSize = (1200, 1200))
     #separate = 37
     separate = 53
+    #separate = 101
     #separate = 233
     
     # Create land beyond the outer rim by another 2km on each side
@@ -178,8 +189,9 @@ if __name__ == '__main__':
                                   maxIterations=200)
     maxRevisLevel=river_extension(hmap, jr=jr, vp=vp, separate=separate, viewStr="revis",
                                   riverSegmentLength=1100, minRiverLength=2400,
-                                  seaShoreOffsetMin=300, seaShoreOffsetMax=1800,
+                                  seaShoreOffsetMin=60, seaShoreOffsetMax=1200,
                                   riverShoreOffsetMax=2400,
+                                  riverShoreSqueeze=500,
                                   maxIterations=200)
 
 
@@ -207,6 +219,47 @@ if __name__ == '__main__':
                       
     seasinterp = jutil.make_array_interp(len(heightmap.HeightMapper._seacolors), -40, 0)
     landinterp = jutil.make_array_interp(len(heightmap.HeightMapper._landcolors), 0, 984)
+
+    ## ( distance, minSlope, maxSlope )
+    landSlopes = ((20, 0.01, 0.07),
+                  (25, 0.01, 1.20),
+                  (30, 0.02, 0.07),
+                  (190, 0.02, 0.10),
+                  (200, 0.02, 1.20),
+                  (210, 0.03, 0.10),
+                  (700, 0.03, 0.15),
+                  (800, 0.05, 1.20),
+                  (1500, 0.65, 1.20))
+
+    landSlopes = ((150, 0.001, 0.07),
+                  (225, 0.01, 1.20),
+                  (300, 0.02, 0.07),
+                  (450, 0.02, 0.10),
+                  (600, 0.05, 1.20),
+                  (1500, 0.90, 1.20))
+    
+    landValues = []
+    slopeIdx = 0
+    lwf = lambda a: (0, 1)
+    for level in range(maxRevisLevel + 1):
+        levelDist = level * separate
+        while slopeIdx < len(landSlopes) and levelDist > landSlopes[slopeIdx][0]:
+            slopeIdx += 1
+            if slopeIdx < len(landSlopes):
+                print(f'{levelDist=} {landSlopes[slopeIdx-1][0]=} {landSlopes[slopeIdx][0]=}')
+                lwf = jutil.make_linear_interp(landSlopes[slopeIdx-1][0],
+                                               landSlopes[slopeIdx][0])
+            else:
+                lwf = lambda a: (1, 0)
+
+        aW, bW = lwf(levelDist)
+        print (aW, bW)
+        landValues.append((landSlopes[max(0, slopeIdx-1)][1]*aW
+                           + landSlopes[min(len(landSlopes) - 1, slopeIdx)][1]*bW,
+                           landSlopes[max(0, slopeIdx-1)][2]*aW
+                           + landSlopes[min(len(landSlopes) - 1, slopeIdx)][2]*bW))
+    
+    print(f'{landValues=!r}')
     
     def heightcolor(h):
         if(h <= 0):
@@ -216,33 +269,7 @@ if __name__ == '__main__':
         else:
             aIdx, aWt, bIdx, bWt = landinterp(h)
             return tuple(a * aWt + b * bWt for a,b in zip(heightmap.HeightMapper._landcolors[aIdx],
-                                                          heightmap.HeightMapper._landcolors[bIdx]))
-    
-    #landValues = [(None, 0.01, 0.03),
-    #              (None, 0.02, 0.05),
-    #              (None, 0.05, 0.20),
-    #              (None, 0.10, 0.35),
-    #              (None, 0.20, 0.70),
-    #              (None, 0.35, 1.20),
-    #              (None, 0.55, 1.20),
-    #              (None, 0.75, 1.20),
-    #              (None, 0.95, 1.20)]
-    landValues = [(0.01, 0.55),
-                  (0.01, 0.05),
-                  (0.05, 0.20),
-                  (0.15, 0.35),
-                  (0.25, 0.70),
-                  (0.35, 1.20),
-                  (0.55, 1.20),
-
-                  (0.75, 1.20),
-                  (0.75, 1.20),
-                  (0.75, 1.20),
-
-                  (0.95, 1.20)
-                  ]
-    landWeights = jutil.make_array_interp(len(landValues), 1, maxRevisLevel)
-    
+                                                          heightmap.HeightMapper._landcolors[bIdx]))    
         
     def minmaxslope(hmap, pID):
         pLevel = hmap.level(pID)
@@ -256,8 +283,7 @@ if __name__ == '__main__':
 
             return(0.02, 0.10)
 
-        aID, aW, bID, bW = landWeights(pLevel)
-        return tuple(a * aW + b * bW if a is not None and b is not None else None for a, b in zip(landValues[aID], landValues[bID]))
+        return landValues[pLevel]
 
     relax = 1
     while True:
@@ -276,7 +302,7 @@ if __name__ == '__main__':
             relax *= 1.5
     
     if(1):
-        widthatsource = 10
+        widthatsource = 13
         riverbeds = dict()
         for rID, rSize in drains.items():
             wfactor = jr.uniform(0.5, 1.5)

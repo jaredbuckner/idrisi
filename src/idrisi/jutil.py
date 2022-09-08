@@ -27,7 +27,7 @@ def in_radial_fn(pCenter, base, evenAmplSeq, oddAmplSeq):
     return (_in_radial)
 
 def make_linear_interp(a, b):
-    span = b - a
+    span = a - b
 
     def _linterp(v):
         aW = (v-b)/span
@@ -78,6 +78,7 @@ def make_array_interp(tgtArraySize, minVal, maxVal):
         return(pLow, wLow, pHigh, wHigh)
 
     return(_ainterp)
+
 
 class Viewport():
     '''Class objects maintain a relationship between the map grid dimensions and a
