@@ -18,12 +18,12 @@ def quickview(view, fname="cs.png", keep=False):
 
 def river_extension(hmap, *, jr, vp, separate,
                     riverSegmentLength,
+                    riverSegmentVar=0,
                     minRiverLength = None,
                     seaShoreOffsetMin = 0, seaShoreOffsetMax = 0,
                     riverShoreOffsetMin = 0, riverShoreOffsetMax = 0,
                     riverShoreSqueeze = 0,
-                    viewStr, maxIterations=None):
-    riverSearchLevel = max(int(riverSegmentLength / separate), 1)
+                    viewStr, maxIterations=None, retarget=True):
     riverClipLevel  = None if minRiverLength is None else max(int(minRiverLength / separate), 1)
     seaShoreMin     = max(int(seaShoreOffsetMin / separate), 1)
     seaShoreMax     = max(int(seaShoreOffsetMax / separate), 1)
@@ -32,8 +32,11 @@ def river_extension(hmap, *, jr, vp, separate,
     
     mStr = '' if maxIterations is None else f' of {maxIterations}'
     hmap.levelize()
+
+    rsln = max(1,int((riverSegmentLength - riverSegmentVar) / separate))
+    rslx = max(1,int((riverSegmentLength + riverSegmentVar) / separate))
     
-    targets = list(pID for pID, pLevel in hmap.enumerate_levels() if pLevel == riverSearchLevel)
+    targets = list(pID for pID, pLevel in hmap.enumerate_levels() if pLevel is not None and pLevel is not False and rsln <= pLevel <= rslx)
     iteration = 0
     
     while(targets and (maxIterations is None or iteration < maxIterations)):
@@ -42,7 +45,10 @@ def river_extension(hmap, *, jr, vp, separate,
         
         hmap.add_river_source(jr.choice(targets))
         hmap.levelize()
-        targets = list(pID for pID, pLevel in hmap.enumerate_levels() if pLevel == riverSearchLevel)
+        if retarget:
+            targets = list(pID for pID, pLevel in hmap.enumerate_levels() if pLevel is not None and pLevel is not False and rsln <= pLevel <= rslx)
+        else:
+            targets = list(pID for pID in targets if rsln <= hmap.level(pID) <= rslx)
 
     if(riverClipLevel is not None):
         pass
@@ -98,8 +104,8 @@ if __name__ == '__main__':
     jr = jrandom.JRandom()
     vp = jutil.Viewport(gridSize = (18000, 18000),
                         viewSize = (1200, 1200))
-    #separate = 37
-    separate = 53
+    separate = 37
+    #separate = 53
     #separate = 101
     #separate = 233
     
@@ -183,16 +189,13 @@ if __name__ == '__main__':
 
     maxMajorLevel=river_extension(hmap, jr=jr, vp=vp, separate=separate, viewStr="major",
                                   riverSegmentLength=1100, minRiverLength=3600,
-                                  maxIterations=200)
+                                  maxIterations=400)
     maxMinorLevel=river_extension(hmap, jr=jr, vp=vp, separate=separate, viewStr="minor",
                                   riverSegmentLength=1100, minRiverLength=2400,
-                                  maxIterations=200)
+                                  maxIterations=400)
     maxRevisLevel=river_extension(hmap, jr=jr, vp=vp, separate=separate, viewStr="revis",
                                   riverSegmentLength=1100, minRiverLength=2400,
-                                  seaShoreOffsetMin=60, seaShoreOffsetMax=1200,
-                                  riverShoreOffsetMax=2400,
-                                  riverShoreSqueeze=500,
-                                  maxIterations=200)
+                                  maxIterations=400)
 
 
     drains = hmap.gen_drain_levels()
@@ -215,33 +218,40 @@ if __name__ == '__main__':
                 drains[pID] = 1
         
     print(f"Max draining:  {max(drains.values())}")
+
+    maxWrinkleLevel=river_extension(hmap, jr=jr, vp=vp, separate=separate, viewStr="wrink",
+                                    riverSegmentLength=500, riverSegmentVar=150,
+                                    seaShoreOffsetMin=60, seaShoreOffsetMax=1200,
+                                    riverShoreOffsetMax=2400,
+                                    riverShoreSqueeze=500,
+                                    maxIterations=400,
+                                    retarget=False)
     
-                      
     seasinterp = jutil.make_array_interp(len(heightmap.HeightMapper._seacolors), -40, 0)
     landinterp = jutil.make_array_interp(len(heightmap.HeightMapper._landcolors), 0, 984)
 
     ## ( distance, minSlope, maxSlope )
-    landSlopes = ((20, 0.01, 0.07),
-                  (25, 0.01, 1.20),
-                  (30, 0.02, 0.07),
-                  (190, 0.02, 0.10),
-                  (200, 0.02, 1.20),
-                  (210, 0.03, 0.10),
-                  (700, 0.03, 0.15),
-                  (800, 0.05, 1.20),
-                  (1500, 0.65, 1.20))
+    #landSlopes = ((20, 0.01, 0.07),
+    #              (25, 0.01, 1.20),
+    #              (30, 0.02, 0.07),
+    #              (190, 0.02, 0.10),
+    #              (200, 0.02, 1.20),
+    #              (210, 0.03, 0.10),
+    #              (700, 0.03, 0.15),
+    #              (800, 0.05, 1.20),
+    #              (1500, 0.65, 1.20))
 
     landSlopes = ((150, 0.001, 0.07),
                   (225, 0.01, 1.20),
                   (300, 0.02, 0.07),
                   (450, 0.02, 0.10),
-                  (600, 0.05, 1.20),
+                  (600, 0.05, 0.60),
                   (1500, 0.90, 1.20))
     
     landValues = []
     slopeIdx = 0
     lwf = lambda a: (0, 1)
-    for level in range(maxRevisLevel + 1):
+    for level in range(maxWrinkleLevel + 1):
         levelDist = level * separate
         while slopeIdx < len(landSlopes) and levelDist > landSlopes[slopeIdx][0]:
             slopeIdx += 1
@@ -281,7 +291,7 @@ if __name__ == '__main__':
                 dmag = drains[pID]
                 return(0.02 / dmag, 0.10 / dmag)
 
-            return(0.02, 0.10)
+            return(0.04, 0.30)
 
         return landValues[pLevel]
 
@@ -313,7 +323,7 @@ if __name__ == '__main__':
 
         for rID, dfactor in riverbeds.items():
             rHeight = hmap._height[rID]
-            rDepth = 15 * dfactor
+            rDepth = 18 * dfactor
 
             hmap._height[rID] -= (rDepth if rHeight >= 0 else
                                   (40 + rHeight) / 40 * rDepth if rHeight >= -40 else
@@ -325,9 +335,9 @@ if __name__ == '__main__':
         pLevel = hmap._level[pID]
         qLevel = hmap._level[qID]
         pIsSea = pLevel is None
-        pIsRiver = pLevel is not None and pLevel <=0
+        pIsRiver = pLevel is not None and pLevel <=0 and pID in drains
         qIsSea = qLevel is None
-        qIsRiver = qLevel is not None and qLevel <= 0
+        qIsRiver = qLevel is not None and qLevel <= 0 and qID in drains
         if (pIsRiver and (qIsRiver or qIsSea)) or (pIsSea and qIsRiver):
             return (levelmap.LevelMapper._riverColor,
                     levelmap.LevelMapper._riverColor)
