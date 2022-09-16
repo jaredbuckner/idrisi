@@ -111,10 +111,15 @@ class HeightMapper(levelmap.LevelMapper):
                 newMax = pHx
 
         return(newMin, newMax)
-   
+
+    @staticmethod
+    def _feedbackRpt(numInvalids, numUnskooshed, totalMapSize):
+        print(f'I({numInvalids}) S({numUnskooshed}) T({totalMapSize})')
+    
     def gen_heights(self, slope_fn, sea_height, *,
                     maxHeight=8848, underwaterMul = 3,
-                    epsilon=0.1, selectRange=(0.5, 0.5)):
+                    epsilon=0.1, selectRange=(0.5, 0.5),
+                    skooshWithin=1, feedbackCB=_feedbackRpt):
 
         refractedMin = sea_height / underwaterMul
         
@@ -127,7 +132,8 @@ class HeightMapper(levelmap.LevelMapper):
         while(invalids):
             shuffledinvalids = list(invalids)
             self._jr.shuffle(shuffledinvalids)
-            print(f'I({len(invalids)}) S({len(needsSkooshing)}) T({len(plmap)}))')
+            if feedbackCB is not None:
+                feedbackCB(len(invalids), len(needsSkooshing), len(plmap))
             
             for pID in shuffledinvalids:
                 invalids.remove(pID)
@@ -153,8 +159,13 @@ class HeightMapper(levelmap.LevelMapper):
                 pID = needsSkooshing.pop()
                 pHn, pHx = plmap[pID]
                 pWx = self._jr.uniform(selectRange[0], selectRange[1])
-                pHmid = pHx * pWx + pHn * (1.0 - pWx)
-                plmap[pID] = (pHmid, pHmid)
+                if pHx - pHn > skooshWithin:
+                    plmap[pID] = (pHn + skooshWithin * (1.0 - pWx),
+                                  pHx - skooshWithin * pWx)
+                    needsSkooshing.insert(pID, 0)
+                else:
+                    pHmid = pHx * pWx + pHn * (1.0 - pWx)
+                    plmap[pID] = (pHmid, pHmid)
                 invalids.update(self.neighbors(pID))
 
 
@@ -233,7 +244,7 @@ class _ut_HeightMapper(unittest.TestCase):
                                                           hmap.level_color(qID, maxLevel=ml)))
         self.quickview(view)
         
-        hmap.gen_heights(lambda hmap, pID: (0.00, 0.02) if hmap.level(pID) is None or hmap.level(pID) is False else (0.00, 0.05) if hmap.level(pID) <= 0 else (0.02, 1.20), -40, maxHeight=984, selectRange=(0.5, 1.0))
+        hmap.gen_heights(lambda hmap, pID: (0.00, 0.02) if hmap.level(pID) is None or hmap.level(pID) is False else (0.001, 0.05) if hmap.level(pID) <= 0 else (0.03, 0.50), -40, maxHeight=984, selectRange=(0.0, 1.0))
         print(f'{hmap._lowest} - {hmap._highest}')
         
         def edge_color_fn(pID, qID):

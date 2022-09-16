@@ -7,6 +7,7 @@ import math
 import os
 import PIL.Image
 import subprocess
+import tqdm
 
 def quickview(view, fname="cs.png", keep=False):
     view.save(fname)
@@ -30,18 +31,24 @@ def river_extension(hmap, *, jr, vp, separate,
     riverShoreMin   = max(int(riverShoreOffsetMin / separate), 1)
     riverShoreMax   = max(int(riverShoreOffsetMax / separate), 1)
     
-    mStr = '' if maxIterations is None else f' of {maxIterations}'
     hmap.levelize()
 
     rsln = max(1,int((riverSegmentLength - riverSegmentVar) / separate))
     rslx = max(1,int((riverSegmentLength + riverSegmentVar) / separate))
+    rsla = (rsln + rslx) / 2
+
+    probableIterations = math.ceil(sum(1 for pID, pLevel in hmap.enumerate_levels() if pLevel is not None and pLevel is not False and rsln <= pLevel) / rsla / rsla)
+    if maxIterations is not None and maxIterations < probableIterations:
+        probableIterations = maxIterations
     
     targets = list(pID for pID, pLevel in hmap.enumerate_levels() if pLevel is not None and pLevel is not False and rsln <= pLevel <= rslx)
     iteration = 0
     
+    meter = tqdm.tqdm(total=probableIterations, desc=viewStr, leave=True)
+    
     while(targets and (maxIterations is None or iteration < maxIterations)):
         iteration += 1
-        print (f"{viewStr}{iteration}{mStr}")
+        #print (f"{viewStr}{iteration}{mStr}")
         
         hmap.add_river_source(jr.choice(targets))
         hmap.levelize()
@@ -50,6 +57,8 @@ def river_extension(hmap, *, jr, vp, separate,
         else:
             targets = list(pID for pID in targets if rsln <= hmap.level(pID) <= rslx)
 
+        meter.update()
+    
     if(riverClipLevel is not None):
         pass
         hmap.remove_river_stubs(riverClipLevel)
@@ -67,6 +76,7 @@ def river_extension(hmap, *, jr, vp, separate,
                   riverShoreMin=riverShoreMin, riverShoreMax=riverShoreMax, riverLiftFn=squeezeFn)
 
     maxLevel = hmap.max_level()
+    meter.close()
     
     ## DRAW MAJOR RIVER LEVELS
     view = PIL.Image.new('RGB', vp.view_size())
@@ -214,7 +224,10 @@ if __name__ == '__main__':
                 print(f"Warning!  Drain point has a non-river level of {pLevel!r}")
         else:
             if pLevel is not None and pLevel is not False and pLevel <= 0:
-                print(f"Warning!  River point with level {pLevel!r} is not in the drain list")
+                ## We know!  We know!  I wish I knew why this was happening!
+                ## Stop yelling, just fix it!
+                
+                # print(f"Warning!  River point with level {pLevel!r} is not in the drain list")
                 drains[pID] = 1
         
     print(f"Max draining:  {max(drains.values())}")
@@ -241,18 +254,19 @@ if __name__ == '__main__':
     #              (800, 0.05, 1.20),
     #              (1500, 0.65, 1.20))
 
-    landSlopes = ((150, 0.001, 0.07),
-                  (225, 0.01, 1.20),
-                  (300, 0.02, 0.07),
+    landSlopes = ((175, 0.001, 0.07),
+                  (225, 0.01, 0.30),
+                  (275, 0.02, 0.07),
                   (450, 0.02, 0.10),
                   (600, 0.05, 0.60),
-                  (1500, 0.90, 1.20))
+                  (1500, 0.07, 1.20))
     
     landValues = []
     slopeIdx = 0
     lwf = lambda a: (0, 1)
     for level in range(maxWrinkleLevel + 1):
         levelDist = level * separate
+
         while slopeIdx < len(landSlopes) and levelDist > landSlopes[slopeIdx][0]:
             slopeIdx += 1
             if slopeIdx < len(landSlopes):
@@ -289,12 +303,27 @@ if __name__ == '__main__':
         if pLevel <= 0:            
             if pID in drains:
                 dmag = drains[pID]
-                return(0.02 / dmag, 0.10 / dmag)
+                return(0.00 / dmag, 0.07 / dmag)
 
-            return(0.04, 0.30)
+            return(0.00, 0.15)
 
         return landValues[pLevel]
 
+    def makeMeterWithCB():
+        lastTotal = hmap.point_count() * 2
+        meter = tqdm.tqdm(total=lastTotal, leave=True)
+        def meterCB(nI, nS, nT):
+            nonlocal lastTotal
+            
+            if lastTotal != 2 * nT:
+                lastTotal = 2 * nT
+                meter.reset(total=lastTotal)
+
+            meter.n = lastTotal-nI-nS
+            meter.refresh()
+
+        return meter, meterCB
+    
     relax = 1
     while True:
         print(f"I am relaxed:  {relax}")
@@ -302,22 +331,37 @@ if __name__ == '__main__':
         def mms(*args):
             n, x = minmaxslope(*args)
             return(n / relax, x)
-        
-        try:            
-            hmap.gen_heights(mms, sea_height=-40, maxHeight=984, selectRange=(0.5, 0.7))
+
+        meter, meterCB = makeMeterWithCB()
+        try:
+            hmap.gen_heights(mms, sea_height=-40, maxHeight=984, selectRange=(0.4, 0.6), feedbackCB=meterCB, skooshWithin=10)
             print(f"Final relaxation:  {relax}")
             break
         except RuntimeError as e:
             print(e)
             relax *= 1.5
-    
+        except KeyboardInterrupt as e:
+            print(e)
+            relax *= 1.5                  
+
+        meter.close()
+        
     if(1):
         widthatsource = 13
         riverbeds = dict()
         for rID, rSize in drains.items():
-            wfactor = jr.uniform(0.5, 1.5)
+            wfactor = jr.uniform(0.8, 1.2)
+            communityDist = widthatsource * max(1, (2 * rSize - 1)) * wfactor
+            expectedCommunitySize = 2 * math.pi * communityDist * communityDist / separate / separate
+            community = tuple(hmap.community(rID, widthatsource * max(1, (2 * rSize - 1)) * wfactor))
+            if rID not in community:
+                community = community + (rID,)
+
             dfactor = 1.0 / wfactor
-            for bID in (rID, *hmap.community(rID, widthatsource * rSize * wfactor)):
+            if(len(community) < expectedCommunitySize):
+                dfactor *= expectedCommunitySize / len(community)
+            
+            for bID in community:
                 if bID not in riverbeds or riverbeds[bID] < dfactor:
                     riverbeds[bID] = dfactor
 
