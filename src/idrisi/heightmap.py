@@ -91,6 +91,8 @@ class HeightMapper(levelmap.LevelMapper):
 
         newMin = None
         newMax = None
+        qIDMin = None
+        qIDMax = None
         
         for qID in self.neighbors(pID):
             qHn, qHx = plmap[qID]
@@ -105,12 +107,14 @@ class HeightMapper(levelmap.LevelMapper):
                 pHx = qHx + maxDel
                 pHn = qHn + minDel
 
-            if(newMin is None or newMin < pHn):
+            if(newMin is None or newMin < pHn):                
                 newMin = pHn
+                qIDMin = qID
             if(newMax is None or newMax > pHx):
                 newMax = pHx
+                qIDMax = qID
 
-        return(newMin, newMax)
+        return(newMin, newMax, qIDMin, qIDMax)
 
     @staticmethod
     def _feedbackRpt(numInvalids, numUnskooshed, totalMapSize):
@@ -138,10 +142,10 @@ class HeightMapper(levelmap.LevelMapper):
             for pID in shuffledinvalids:
                 invalids.remove(pID)
                 pHn, pHx = plmap[pID]
-                newMin, newMax = self._local_height_limits(pID, hlmap, plmap)
+                newMin, newMax, qIDMin, qIDMax = self._local_height_limits(pID, hlmap, plmap)
 
                 if(newMin > newMax + epsilon or newMin > pHx + epsilon or pHn > newMax + epsilon):
-                    raise RuntimeError(f"For pID={pID} at level {self.level(pID)} with limits ({pHn}, {pHx}), the surrounding points have created impossible limits ({newMin}, {newMax})!")
+                    raise RuntimeError(f"For pID={pID} at level {self.level(pID)} with limits ({pHn}, {pHx}), the surrounding points have created impossible limits ({newMin} from level {self.level(qIDMin)}, {newMax} from level {self.level(qIDMax)})!")
 
                 changed = False
                 if(newMin > pHn + epsilon):
@@ -155,8 +159,9 @@ class HeightMapper(levelmap.LevelMapper):
                     plmap[pID] = (pHn, pHx)
                     invalids.update(self.neighbors(pID))
             
-            if(not invalids and needsSkooshing):                
-                pID = needsSkooshing.pop()
+            if(not invalids and needsSkooshing):
+                skooshID, pID = min(enumerate(needsSkooshing), key=lambda entry:plmap[entry[1]][1] - plmap[entry[1]][0])
+                pID = needsSkooshing.pop(skooshID)
                 pHn, pHx = plmap[pID]
                 pWx = self._jr.uniform(selectRange[0], selectRange[1])
                 if pHx - pHn > skooshWithin:

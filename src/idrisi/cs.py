@@ -17,6 +17,19 @@ def quickview(view, fname="cs.png", keep=False):
         os.remove(fname)
     return
 
+def gen_select_weights(hmap, centerPoint):
+    sw = list()
+    for pID, point in hmap.enumerate_points():
+        delPoint = (point[0] - centerPoint[0],
+                    point[1] - centerPoint[1])
+        sw.append(delPoint[0] * delPoint[0] + delPoint[1] * delPoint[1])
+
+    swmax = max(sw)
+    for pID, weight in enumerate(sw):
+        sw[pID] = swmax - weight + 1
+
+    return sw
+
 def river_extension(hmap, *, jr, vp, separate,
                     riverSegmentLength,
                     riverSegmentVar=0,
@@ -24,6 +37,7 @@ def river_extension(hmap, *, jr, vp, separate,
                     seaShoreOffsetMin = 0, seaShoreOffsetMax = 0,
                     riverShoreOffsetMin = 0, riverShoreOffsetMax = 0,
                     riverShoreSqueeze = 0,
+                    selectWeights = None,
                     viewStr, maxIterations=None, retarget=True):
     riverClipLevel  = None if minRiverLength is None else max(int(minRiverLength / separate), 1)
     seaShoreMin     = max(int(seaShoreOffsetMin / separate), 1)
@@ -37,7 +51,7 @@ def river_extension(hmap, *, jr, vp, separate,
     rslx = max(1,int((riverSegmentLength + riverSegmentVar) / separate))
     rsla = (rsln + rslx) / 2
 
-    probableIterations = math.ceil(sum(1 for pID, pLevel in hmap.enumerate_levels() if pLevel is not None and pLevel is not False and rsln <= pLevel) / rsla / rsla)
+    probableIterations = math.ceil(sum(1 for pID, pLevel in hmap.enumerate_levels() if pLevel is not None and pLevel is not False and rsln <= pLevel and (retarget or pLevel <= rslx)) / rsla / rsla)
     if maxIterations is not None and maxIterations < probableIterations:
         probableIterations = maxIterations
     
@@ -49,8 +63,14 @@ def river_extension(hmap, *, jr, vp, separate,
     while(targets and (maxIterations is None or iteration < maxIterations)):
         iteration += 1
         #print (f"{viewStr}{iteration}{mStr}")
+
+        if(selectWeights is None):
+            tID = jr.choice(targets)
+        else:
+            localWeights = tuple(selectWeights[pID] for pID in targets)
+            tID = jr.choices(targets, localWeights)[0]
         
-        hmap.add_river_source(jr.choice(targets))
+        hmap.add_river_source(tID)
         hmap.levelize()
         if retarget:
             targets = list(pID for pID, pLevel in hmap.enumerate_levels() if pLevel is not None and pLevel is not False and rsln <= pLevel <= rslx)
@@ -196,16 +216,17 @@ if __name__ == '__main__':
     ### END DRAW SHORE LEVELS
     
     #vp.reset_grid_sel()
+    selectWeights = gen_select_weights(hmap, (9000, 13000))
 
     maxMajorLevel=river_extension(hmap, jr=jr, vp=vp, separate=separate, viewStr="major",
                                   riverSegmentLength=1100, minRiverLength=3600,
-                                  maxIterations=400)
+                                  maxIterations=400, selectWeights=selectWeights)
     maxMinorLevel=river_extension(hmap, jr=jr, vp=vp, separate=separate, viewStr="minor",
                                   riverSegmentLength=1100, minRiverLength=2400,
-                                  maxIterations=400)
+                                  maxIterations=400, selectWeights=selectWeights)
     maxRevisLevel=river_extension(hmap, jr=jr, vp=vp, separate=separate, viewStr="revis",
                                   riverSegmentLength=1100, minRiverLength=2400,
-                                  maxIterations=400)
+                                  maxIterations=400, selectWeights=selectWeights)
 
 
     drains = hmap.gen_drain_levels()
@@ -234,8 +255,8 @@ if __name__ == '__main__':
 
     maxWrinkleLevel=river_extension(hmap, jr=jr, vp=vp, separate=separate, viewStr="wrink",
                                     riverSegmentLength=500, riverSegmentVar=150,
-                                    seaShoreOffsetMin=60, seaShoreOffsetMax=1200,
-                                    riverShoreOffsetMax=2400,
+                                    seaShoreOffsetMin=0, seaShoreOffsetMax=1200,
+                                    riverShoreOffsetMax=1500,
                                     riverShoreSqueeze=500,
                                     maxIterations=400,
                                     retarget=False)
@@ -254,12 +275,18 @@ if __name__ == '__main__':
     #              (800, 0.05, 1.20),
     #              (1500, 0.65, 1.20))
 
-    landSlopes = ((175, 0.001, 0.07),
-                  (225, 0.01, 0.30),
-                  (275, 0.02, 0.07),
-                  (450, 0.02, 0.10),
-                  (600, 0.05, 0.60),
-                  (1500, 0.07, 1.20))
+    #landSlopes = ((175, 0.001, 0.07),
+    #              (225, 0.01, 0.30),
+    #              (275, 0.02, 0.07),
+    #              (450, 0.02, 0.10),
+    #              (600, 0.05, 0.60),
+    #              (1500, 0.07, 1.20))
+    landSlopes = ((   0, 0.01, 0.02),
+                  ( 400, 0.01, 0.10),
+                  ( 450, 0.05, 0.20),
+                  ( 600, 0.35, 0.50),
+                  ( 750, 0.35, 0.80),
+                  (1150, 0.50, 1.20))
     
     landValues = []
     slopeIdx = 0
@@ -277,7 +304,6 @@ if __name__ == '__main__':
                 lwf = lambda a: (1, 0)
 
         aW, bW = lwf(levelDist)
-        print (aW, bW)
         landValues.append((landSlopes[max(0, slopeIdx-1)][1]*aW
                            + landSlopes[min(len(landSlopes) - 1, slopeIdx)][1]*bW,
                            landSlopes[max(0, slopeIdx-1)][2]*aW
@@ -302,10 +328,10 @@ if __name__ == '__main__':
 
         if pLevel <= 0:            
             if pID in drains:
-                dmag = drains[pID]
-                return(0.00 / dmag, 0.07 / dmag)
+                dmag = 2 ** (drains[pID] - 1)
+                return(0.00 / dmag, 0.10 / dmag)
 
-            return(0.00, 0.15)
+            return(0.00, 0.30)
 
         return landValues[pLevel]
 
@@ -334,15 +360,15 @@ if __name__ == '__main__':
 
         meter, meterCB = makeMeterWithCB()
         try:
-            hmap.gen_heights(mms, sea_height=-40, maxHeight=984, selectRange=(0.4, 0.6), feedbackCB=meterCB, skooshWithin=10)
+            hmap.gen_heights(mms, sea_height=-40, maxHeight=984, selectRange=(0.5, 0.7), feedbackCB=meterCB, skooshWithin=100)
             print(f"Final relaxation:  {relax}")
             break
         except RuntimeError as e:
             print(e)
-            relax *= 1.5
+            relax *= 1.21
         except KeyboardInterrupt as e:
             print(e)
-            relax *= 1.5                  
+            relax *= 1.21                 
 
         meter.close()
         
