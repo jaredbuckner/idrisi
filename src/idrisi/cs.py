@@ -392,11 +392,11 @@ if __name__ == '__main__':
     footHillWidth += riverSeparation / 8
     midHillWidth += riverSeparation / 8
     
-    footHillGrade   = csmap.jr.uniform(0.01, 0.10)
-    midHillGrade    = csmap.jr.uniform(0.05, 0.20)
+    footHillGrade   = csmap.jr.uniform(0.10, 0.30)
+    midHillGrade    = csmap.jr.uniform(0.15, 0.45)
     shoulderWidth   = csmap.jr.uniform(riverSeparation / 8, riverSeparation / 2)
-    shoulderGrade   = csmap.jr.uniform(0.10, 0.50)
-    peakGrade       = csmap.jr.uniform(0.30, 0.70)
+    shoulderGrade   = csmap.jr.uniform(0.30, 0.55)
+    peakGrade       = csmap.jr.uniform(0.45, 0.80)
 
     print( "        SeaShore FloodPln FootHill MidHill  Shoulder    Peak")
     print(f" Width:          {floodPlainWidth:8.2f} {footHillWidth:8.2f} {midHillWidth:8.2f} {shoulderWidth:8.2f}")
@@ -526,10 +526,10 @@ if __name__ == '__main__':
                                    riverSegmentLength=wrinkleMeanLength,
                                    riverSegmentVar=wrinkleDevLength,
                                    seaShoreOffsetMin=floodPlainWidth / 2,
-                                   seaShoreOffsetMax=floodPlainWidth + footHillWidth + midHillWidth/2,
+                                   seaShoreOffsetMax=floodPlainWidth + footHillWidth + midHillWidth,
                                    riverShoreOffsetMin=0,
-                                   riverShoreOffsetMax=floodPlainWidth + footHillWidth,
-                                   riverShoreSqueeze=floodPlainWidth,
+                                   riverShoreOffsetMax=midHillWidth + shoulderWidth,
+                                   riverShoreSqueeze=floodPlainWidth + footHillWidth,
                                    maxIterations=400,
                                    retarget=False)
 
