@@ -347,9 +347,9 @@ if __name__ == '__main__':
     ## value generates a more blocky grid, yet much faster.
     csmap = CS(    
         #separate = 37
-        separate = 53
+        #separate = 53
         #separate = 101
-        #separate = 233
+        separate = 233
         )
 
     print(f"Grid of {csmap.point_count()} points generated with separation={csmap.separate:.2f}.")

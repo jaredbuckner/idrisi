@@ -44,8 +44,8 @@ class DelMapper:
     def draw_edges(self, view, *,
                    grid2view_fn,
                    edge_color_fn):
-        for pID, pPoint in self.enumerate_points():
-            pXY = grid2view_fn(pPoint)
+        XYs = tuple(grid2view_fn(pPoint) for pPoint in self._grid.points)
+        for pID, pXY in enumerate(XYs):
 
             for qID in self.adjacent_nodes(pID):                
                 if qID < pID:
@@ -55,8 +55,7 @@ class DelMapper:
                 if pColor is None or qColor is None:
                     continue
 
-                qPoint = self.point(qID)
-                qXY = grid2view_fn(qPoint)
+                qXY = XYs[qID]
                 xspan = qXY[0]-pXY[0]
                 yspan = qXY[1]-pXY[1]
                 ispan = int(2 * max(abs(xspan), abs(yspan)) + 1)
@@ -110,7 +109,7 @@ class DelMapper:
                                             0 <= bW <= 1 and
                                             0 <= cW <=1)):
                     ## Recalculate!
-                    sinterm = None
+                    sinterp = None
                     sID = self.containing_simplex(vPoint)
                     if(sID == -1):
                         continue
