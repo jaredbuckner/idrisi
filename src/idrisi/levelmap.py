@@ -48,6 +48,11 @@ class LevelMapper(delmap.DelMapper):
         ## slopes.
         self._forbiddenEdges = set()
 
+        ## A set of neighbor nodes.  These are the adjacent nodes which are not
+        ## on forbiddenedges.  If the entry is set to None, the neighbor nodes
+        ## have not been calculated.
+        self._neighborNodes = [None] * self.point_count()
+        
     def level(self, pID):
         return(self._level[pID])
 
@@ -65,6 +70,8 @@ class LevelMapper(delmap.DelMapper):
             self._forbiddenEdges.add((aPID, bPID))
         else:
             self._forbiddenEdges.add((bPID, aPID))
+        self._neighborNodes[aPID] = None
+        self._neighborNodes[bPID] = None
 
     def forbid_long_edges(self, limit):
         ## If edge is longer than limit, forbid it!
@@ -129,8 +136,13 @@ class LevelMapper(delmap.DelMapper):
     
 
     def neighbors(self, pID):
+        if self._neighborNodes[pID] is None:
+            ## Recalculate!
+            self._neighborNodes[pID] = tuple(qID for qID in self.adjacent_nodes(pID)
+                                             if not self.is_edge_forbidden(pID, qID))
+            
         ## Yield the adjacent nodes whose edges are not forbidden
-        yield from (qID for qID in self.adjacent_nodes(pID) if not self.is_edge_forbidden(pID, qID))
+        yield from self._neighborNodes[pID]
 
     def community(self, pID, maxDist):
         ## Return a dict[node] => distance for nodes within dist of pID
