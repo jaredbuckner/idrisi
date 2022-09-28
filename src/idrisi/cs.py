@@ -160,7 +160,8 @@ class CS(heightmap.HeightMapper):
                       riverShoreSqueeze = 0,
                       selectWeights=None,
                       maxIterations=None,
-                      retarget=True):
+                      retarget=True,
+                      allowedByID=None):
 
         riverClipLevel  = None if minRiverLength is None else max(int(minRiverLength / self.separate), 1)
         seaShoreMin     = max(int(seaShoreOffsetMin / self.separate), 1)
@@ -178,7 +179,9 @@ class CS(heightmap.HeightMapper):
             probableIterations = maxIterations
             
         targets = list(pID for pID, pLevel in self.enumerate_levels()
-                       if pLevel is not None and pLevel is not False and rsln <= pLevel <= rslx)
+                       if pLevel is not None and pLevel is not False and
+                       (allowedByID is None or allowedByID[pID]) and
+                       rsln <= pLevel <= rslx)
         
         iteration = 0
         meter = tqdm.tqdm(total=probableIterations, desc=meterStr, leave=True)
@@ -196,7 +199,9 @@ class CS(heightmap.HeightMapper):
             
             if retarget:
                 targets = list(pID for pID, pLevel in self.enumerate_levels()
-                               if pLevel is not None and pLevel is not False and rsln <= pLevel <= rslx)
+                               if pLevel is not None and pLevel is not False and
+                               (allowedByID is None or allowedByID[pID]) and
+                               rsln <= pLevel <= rslx)
             else:
                 targets = list(pID for pID in targets if rsln <= self.level(pID) <= rslx)
 
@@ -372,7 +377,7 @@ if __name__ == '__main__':
     ## Rivers have a grade at their source.  They get less steep as they flow
     riverSourceGrade = csmap.jr.uniform(0.1, 0.21)
     print(f"River source grade:  {100*riverSourceGrade:.1f}%")
-
+    
     ## Beyond the river are short invisible feeder streams.  They make the land more wrinkly.
     wrinkleMeanLength = csmap.jr.uniform(0, riverSeparation / 4)
     wrinkleDevLength = csmap.jr.uniform(0, wrinkleMeanLength)
@@ -397,11 +402,14 @@ if __name__ == '__main__':
     shoulderWidth   = csmap.jr.uniform(riverSeparation / 8, riverSeparation / 2)
     shoulderGrade   = csmap.jr.uniform(0.30, 0.55)
     peakGrade       = csmap.jr.uniform(0.45, 0.80)
-
+    
     print( "        SeaShore FloodPln FootHill MidHill  Shoulder    Peak")
     print(f" Width:          {floodPlainWidth:8.2f} {footHillWidth:8.2f} {midHillWidth:8.2f} {shoulderWidth:8.2f}")
     print(f" Grade: {100*shoreGrade:7.1f}% {100*floodPlainGrade:7.1f}% {100*footHillGrade:7.1f}% {100*midHillGrade:7.1f}% {100*shoulderGrade:7.1f}% {100*peakGrade:7.1f}%")
-    
+
+    ## If this is not None, a river is generated from the nearest land point.
+    ## All other rivers attempt to flow to this river.
+    forceRiver=(9000, 9000)
     
     ## Next, create shorelines.  There are a lot of ways to do this.  We will
     ## create base boundaries by creating polygons, generating koch curves, and
@@ -469,11 +477,24 @@ if __name__ == '__main__':
     
     csmap.levelize()
 
+    if(forceRiver is not None):
+        canRiver = tuple((pLevel is not None and pLevel is not False and
+                          pLevel > riverSeparation / csmap.separate)
+                         for pID, pLevel in csmap.enumerate_levels())
+        
+        dist, pID = min(((iPoint[0]-forceRiver[0])**2 +
+                         (iPoint[1]-forceRiver[1])**2, iID) for iID, iPoint in csmap.enumerate_points())
+
+        csmap.add_river_source(pID)
+        csmap.levelize()
+    else:
+        canRiver = None
+    
     if(0):
         view = csmap.draw_levels(maxLevel=csmap.max_level())
         csmap.overlay_parcels(view)
         csmap.quickview(view, fname="out/cs.shore.png", keep=True)
-
+        
     ## Choose a random point within the center 3x3 as a good focus for river generation
     focusPoint = (csmap.jr.uniform(6000, 12000),
                    csmap.jr.uniform(6000, 12000))
@@ -488,7 +509,8 @@ if __name__ == '__main__':
                                        riverSegmentLength=riverSeparation,
                                        minRiverLength=minRiverLength,
                                        maxIterations=400,
-                                       selectWeights=selectWeights)
+                                       selectWeights=selectWeights,
+                                       allowedByID=canRiver)
         view = csmap.draw_levels(maxLevel=maxLevel)
         csmap.overlay_parcels(view)
         csmap.quickview(view, fname=f"out/cs.{viewStr}.png", keep=True)
