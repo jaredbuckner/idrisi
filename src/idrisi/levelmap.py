@@ -265,12 +265,16 @@ class LevelMapper(delmap.DelMapper):
                     if(not self.is_valid_level(qID, **kwargs)):
                         invalids.add(qID)
 
-        
-    def add_river_source(self, pID):
+    
+    def add_river_source(self, pID, skip=0):
+        ## Set skip to the number of levels to skip over before adding river
         pLevel = self._level[pID]
         river = list()
         while(pLevel is not None and pLevel > -len(river)):
-            river.append(pID)
+            if(skip > 0):
+                skip -= 1
+            else:
+                river.append(pID)
             
             lowID = None
             lowLevel = None
