@@ -150,6 +150,7 @@ class CS(heightmap.HeightMapper):
     
     def extend_rivers(self, *,
                       meterStr=None,
+                      riverSeparation,
                       riverSegmentLength,
                       riverSegmentVar=0,
                       minRiverLength = None,
@@ -169,19 +170,26 @@ class CS(heightmap.HeightMapper):
         riverShoreMin   = max(int(riverShoreOffsetMin / self.separate), 1)
         riverShoreMax   = max(int(riverShoreOffsetMax / self.separate), 1)
         squeezeLevels   = int(riverShoreSqueeze / self.separate)
-        
+
+        riverSepLevel = max(1, int(riverSeparation) / self.separate)
+
+        ## River segment limits
         rsln = max(1,int((riverSegmentLength - riverSegmentVar) / self.separate))
         rslx = max(1,int((riverSegmentLength + riverSegmentVar) / self.separate))
         rsla = (rsln + rslx) / 2
+
+        ## River selection choice level limits
+        rscln = (riverSepLevel + rsln) // 2
+        rsclx = (riverSepLevel + rslx) // 2
         
-        probableIterations = math.ceil(sum(1 for pID, pLevel in self.enumerate_levels() if pLevel is not None and pLevel is not False and rsln <= pLevel and (retarget or pLevel <= rslx)) / rsla / rsla)
+        probableIterations = math.ceil(sum(1 for pID, pLevel in self.enumerate_levels() if pLevel is not None and pLevel is not False and rsln <= pLevel and (retarget or pLevel <= rslx)) / riverSepLevel / rsla)
         if maxIterations is not None and maxIterations < probableIterations:
             probableIterations = maxIterations
             
         targets = list(pID for pID, pLevel in self.enumerate_levels()
                        if pLevel is not None and pLevel is not False and
                        (allowedByID is None or allowedByID[pID]) and
-                       rsln <= pLevel <= rslx)
+                       rscln <= pLevel <= rsclx)
         
         iteration = 0
         meter = tqdm.tqdm(total=probableIterations, desc=meterStr, leave=True)
@@ -194,16 +202,21 @@ class CS(heightmap.HeightMapper):
                 localWeights = tuple(selectWeights[pID] for pID in targets)
                 tID = self.jr.choices(targets, localWeights)[0]
 
-            self.add_river_source(tID)
+            tLevel = self.level(tID)
+            skipmin = max(0, tLevel - rslx)
+            skipmax = max(0, tLevel - rsln)
+            skip=self.jr.randint(skipmin, skipmax)
+
+            self.add_river_source(tID, skip=skip)
             self.levelize()
             
             if retarget:
                 targets = list(pID for pID, pLevel in self.enumerate_levels()
                                if pLevel is not None and pLevel is not False and
                                (allowedByID is None or allowedByID[pID]) and
-                               rsln <= pLevel <= rslx)
+                               rscln <= pLevel <= rsclx)
             else:
-                targets = list(pID for pID in targets if rsln <= self.level(pID) <= rslx)
+                targets = list(pID for pID in targets if rscln <= self.level(pID) <= rsclx)
 
             meter.update()
 
@@ -303,7 +316,7 @@ class CS(heightmap.HeightMapper):
             meter.close()
 
     
-    def punch_rivers(self, *, drainMap, widthatsource=13):
+    def punch_rivers(self, *, drainMap, widthatsource=13, meanDepth=18):
         widthatsource = 13
         riverbeds = dict()
         for rID, rSize in drainMap.items():
@@ -324,7 +337,7 @@ class CS(heightmap.HeightMapper):
 
         for rID, dfactor in riverbeds.items():
             rHeight = self._height[rID]
-            rDepth = 18 * dfactor
+            rDepth = meanDepth * dfactor
 
             self._height[rID] -= (rDepth if rHeight >= 0 else
                                   (40 + rHeight) / 40 * rDepth if rHeight >= -40 else
@@ -371,8 +384,8 @@ if __name__ == '__main__':
     ## NOTE:  This is really too long for "nice" river segments.  Later on
     ## we'll have to create a segment length and figure out how to make that
     ## work well.
-    # riverSegmentLength = csmap.jr.uniform(250,750)
-    # print(f"Flowing rivers shall be constructed out of {riverSegmentLength:.2f}m segments")
+    riverSegmentLength = csmap.jr.uniform(200,500)
+    print(f"Flowing rivers shall be constructed out of {riverSegmentLength:.2f}m segments")
 
     ## Rivers have a grade at their source.  They get less steep as they flow
     riverSourceGrade = csmap.jr.uniform(0.1, 0.21)
@@ -385,7 +398,8 @@ if __name__ == '__main__':
     print(f"Feeder streams will be from {wrinkleMeanLength-wrinkleDevLength:.2f}m to {wrinkleMeanLength+wrinkleDevLength:.2f}m long")
     print(f"Feeder streams have a target grade of {100*wrinkleGrade:.1f}%")
 
-    
+    meanDepth = csmap.jr.uniform(10, 20)
+    print(f"Rivers have a mean depth of {meanDepth:.2f}m")
     
     ## Width and grade of various land bits
     shoreGrade      = csmap.jr.uniform(0.10, 0.50)
@@ -506,7 +520,8 @@ if __name__ == '__main__':
                                     (riverSeparation * 2, "minor"),
                                     (riverSeparation * 1, "revis")):
         maxLevel = csmap.extend_rivers(meterStr=viewStr,
-                                       riverSegmentLength=riverSeparation,
+                                       riverSeparation=riverSeparation,
+                                       riverSegmentLength=riverSegmentLength,
                                        minRiverLength=minRiverLength,
                                        maxIterations=400,
                                        selectWeights=selectWeights,
@@ -545,6 +560,7 @@ if __name__ == '__main__':
 
     ## Finally, make some wrinkly bits to represent unseen creek drainage
     maxLevel = csmap.extend_rivers(meterStr="wrink",
+                                   riverSeparation=riverSeparation-wrinkleMeanLength-wrinkleDevLength,
                                    riverSegmentLength=wrinkleMeanLength,
                                    riverSegmentVar=wrinkleDevLength,
                                    seaShoreOffsetMin=floodPlainWidth / 2,
@@ -571,7 +587,7 @@ if __name__ == '__main__':
                                   peakGrade=peakGrade);
 
     csmap.gen_heights_really_hard(slopeFn)
-    csmap.punch_rivers(drainMap=drains)
+    csmap.punch_rivers(drainMap=drains, meanDepth=meanDepth)
 
     print(f"Land runs from {csmap._lowest:.2f}m to {csmap._highest:.2f}m")
 
