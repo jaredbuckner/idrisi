@@ -240,7 +240,7 @@ class CS(heightmap.HeightMapper):
 
     def make_slope_fn(self, distGradeSeq, *,
                       drainMap,
-                      shoreGrade, wrinkGrade, sourceGrade, peakGrade):
+                      shoreGrade, wrinkGrade, riverMinGrade, sourceGrade, peakGrade):
         landSlopes = list()
         for distance, grade in distGradeSeq:
             level = int(distance / self.separate + 0.5)
@@ -261,30 +261,30 @@ class CS(heightmap.HeightMapper):
             if pLevel <= 0:
                 if pID in drainMap:
                     dmag = 2 ** drainMap[pID] - 1
-                    return(0.0, 2 * sourceSlope / dmag)
+                    return(0.0, 2 * max(riverMinGrade, sourceSlope / dmag))
 
                 else:
                     return(0.0, 2 * wrinkSlope)
 
             for landLevel, landSlope in landSlopes:
                 if pLevel <= landLevel:
-                    return(0.0, 2 *landSlope)
+                    return(0.0, 2 * landSlope)
 
             return(0.0, 2 * peakSlope)
 
         return(_slope_fn)
 
     def make_genheight_meter_with_cb(self):
-        lastTotal = self.point_count() * 2
+        lastTotal = self.point_count()
         meter = tqdm.tqdm(total=lastTotal, leave=True)
         def meterCB(nI, nS, nT):
             nonlocal lastTotal
             
-            if lastTotal != 2 * nT:
-                lastTotal = 2 * nT
+            if lastTotal != nT:
+                lastTotal = nT
                 meter.reset(total=lastTotal)
-
-            meter.n = lastTotal-nI-nS
+            
+            meter.n = lastTotal-max(nI, nS)
             meter.refresh()
 
         return meter, meterCB
@@ -302,16 +302,16 @@ class CS(heightmap.HeightMapper):
             try:
                 self.gen_heights(mms, sea_height=-40, maxHeight=984,
                                  selectRange=(0.4, 0.6),
-                                 feedbackCB=meterCB, skooshWithin=100)
+                                 feedbackCB=meterCB, skooshWithin=10)
                 
                 print(f"Final relaxation:  {relax}")
                 break
             except RuntimeError as e:
                 print(e)
                 relax *= 1.21
-            except KeyboardInterrupt as e:
-                print(e)
-                relax *= 1.21                 
+            #except KeyboardInterrupt as e:
+            #    print(e)
+            #    relax *= 1.21                 
 
             meter.close()
 
@@ -359,16 +359,59 @@ class CS(heightmap.HeightMapper):
 
         
 if __name__ == '__main__':
-    
+    import argparse
 
+    parser = argparse.ArgumentParser(
+        description = "Idrisi Map Generator tuned for Cities Skylines Heightmaps")
+
+    parser.add_argument('--separate', type=float, metavar='DIST', default=53,
+                        help="mean separation between grid points")
+    parser.add_argument('--river_separation', type=float, metavar='DIST', default=None,
+                        help="minimum distance between flowing rivers")
+    parser.add_argument('--river_segment_length', type=float, metavar='DIST', default=None,
+                        help="mean length of river segments")
+    parser.add_argument('--river_source_grade', type=float, metavar='PCT', default=None,
+                        help="target grade of rivers at source")
+    parser.add_argument('--river_min_grade', type=float, metavar='PCT', default=None,
+                        help="minimum target grade for all rivers")
+    parser.add_argument('--wrinkle_mean_length', type=float, metavar='DIST', default=None,
+                        help="mean length of invisible feeder streams")
+    parser.add_argument('--wrinkle_dev_length', type=float, metavar='DIST', default=None,
+                        help="standard deviation from mean length of invisible feeder streams")
+    parser.add_argument('--wrinkle_grade', type=float, metavar='PCT', default=None,
+                        help="target grade of invisible feeder streams")
+    parser.add_argument('--river_mean_depth', type=float, metavar='DEPTH', default=None,
+                        help="target mean depth for rivers")
+    parser.add_argument('--shore_grade', type=float, metavar='PCT', default=None,
+                        help="target grade of underwater land adjacent to shore")
+    parser.add_argument('--flood_plain_width', type=float, metavar='DIST', default=None,
+                        help="target width of flood plain around river mouths")
+    parser.add_argument('--flood_plain_grade', type=float, metavar='PCT', default=None,
+                        help="target grade of flood plain")
+    parser.add_argument('--foothill_width', type=float, metavar='DIST', default=None,
+                        help="target width of foothill adjacent to flood plain")
+    parser.add_argument('--foothill_grade', type=float, metavar='PCT', default=None,
+                        help="target grade of foothill")
+    parser.add_argument('--midhill_width', type=float, metavar='DIST', default=None,
+                        help="target width of middle part of hill")
+    parser.add_argument('--midhill_grade', type=float, metavar='PCT', default=None,
+                        help="target grade of midhill")
+    parser.add_argument('--shoulder_width', type=float, metavar='DIST', default=None,
+                        help="target width of shoulder of peak above the midhill")
+    parser.add_argument('--shoulder_grade', type=float, metavar='PCT', default=None,
+                        help="target grade of shoulder")
+    parser.add_argument('--peak_grade', type=float, metavar='PCT', default=None,
+                        help="target grade of highest peaks")
+    
+    
+    
+    args=parser.parse_args()
+    
+    
+    
     ## First, generate the base grid of points for the map.  A larger separate
     ## value generates a more blocky grid, yet much faster.
-    csmap = CS(    
-        #separate = 37
-        separate = 53
-        #separate = 101
-        #separate = 233
-        )
+    csmap = CS(separate = args.separate)
 
     print(f"Grid of {csmap.point_count()} points generated with separation={csmap.separate:.2f}.")
     
@@ -378,44 +421,70 @@ if __name__ == '__main__':
     ## We probably don't want anything nearer than two large rivers per playing
     ## grid (2kmx2km), and we probably don't want anything less than having to
     ## go a grid away to get to a river.
-    riverSeparation = csmap.jr.uniform(750, 2250)
+    riverSeparation = (args.river_separation if args.river_separation is not None
+                       else csmap.jr.uniform(1250, 2250))
     print(f"Flowing rivers shall be separated by no less than {riverSeparation:.2f}m")
-
-    ## NOTE:  This is really too long for "nice" river segments.  Later on
-    ## we'll have to create a segment length and figure out how to make that
-    ## work well.
-    riverSegmentLength = csmap.jr.uniform(200,500)
+    
+    ## Rivers are made out of segments.  This gives them a lovely wriggly shape
+    riverSegmentLength = (args.river_segment_length if args.river_segment_length is not None
+                          else csmap.jr.uniform(200,500))
     print(f"Flowing rivers shall be constructed out of {riverSegmentLength:.2f}m segments")
-
+    
     ## Rivers have a grade at their source.  They get less steep as they flow
-    riverSourceGrade = csmap.jr.uniform(0.1, 0.21)
-    print(f"River source grade:  {100*riverSourceGrade:.1f}%")
+    riverSourceGrade = (args.river_source_grade / 100 if args.river_source_grade is not None
+                        else csmap.jr.uniform(0.05, 0.21))    
+    riverMinGrade = (args.river_min_grade / 100 if args.river_min_grade is not None
+                     else csmap.jr.uniform(0.001, 0.02))
+    print(f"River source grade:  {100*riverMinGrade:.1f}% - {100*riverSourceGrade:.1f}%")
     
     ## Beyond the river are short invisible feeder streams.  They make the land more wrinkly.
-    wrinkleMeanLength = csmap.jr.uniform(0, riverSeparation / 4)
-    wrinkleDevLength = csmap.jr.uniform(0, wrinkleMeanLength)
-    wrinkleGrade = riverSourceGrade * csmap.jr.uniform(1, 1.5)
+    wrinkleMeanLength = (args.wrinkle_mean_length if args.wrinkle_mean_length is not None
+                         else csmap.jr.uniform(0, riverSeparation / 4))
+    wrinkleDevLength = (args.wrinkle_dev_length if args.wrinkle_dev_length is not None
+                        else csmap.jr.uniform(0, wrinkleMeanLength))
+    wrinkleGrade = (args.wrinkle_grade / 100 if args.wrinkle_grade is not None
+                    else riverSourceGrade * csmap.jr.uniform(1, 1.5))
     print(f"Feeder streams will be from {wrinkleMeanLength-wrinkleDevLength:.2f}m to {wrinkleMeanLength+wrinkleDevLength:.2f}m long")
     print(f"Feeder streams have a target grade of {100*wrinkleGrade:.1f}%")
-
-    meanDepth = csmap.jr.uniform(10, 20)
+    
+    meanDepth = (args.river_mean_depth if args.river_mean_depth is not None
+                 else csmap.jr.uniform(10, 20))
     print(f"Rivers have a mean depth of {meanDepth:.2f}m")
     
     ## Width and grade of various land bits
-    shoreGrade      = csmap.jr.uniform(0.10, 0.50)
-    floodPlainWidth = csmap.jr.uniform(csmap.separate, riverSeparation * 3 / 4)
-    floodPlainGrade = csmap.jr.uniform(0.00, 0.02)
+    shoreGrade      = (args.shore_grade / 100 if args.shore_grade is not None
+                       else csmap.jr.uniform(0.10, 0.50))
+    floodPlainWidth = (args.flood_plain_width if args.flood_plain_width is not None
+                       else csmap.jr.uniform(csmap.separate, riverSeparation * 3 / 4))
+    floodPlainGrade = (args.flood_plain_grade if args.flood_plain_grade is not None
+                       else csmap.jr.uniform(0.01, 0.03))
 
     ## Foothill + Midhill = riverSeparation / 2
-    footHillWidth, midHillWidth = csmap.jr.rand_sum_to_n(riverSeparation / 4, 2)
-    footHillWidth += riverSeparation / 8
-    midHillWidth += riverSeparation / 8
+    if args.foothill_width is None:
+        if args.midhill_width is None:            
+            footHillWidth, midHillWidth = csmap.jr.rand_sum_to_n(riverSeparation / 4, 2)
+            footHillWidth += riverSeparation / 8
+            midHillWidth += riverSeparation / 8
+        else:
+            footHillWidth = max(0, riverSeparation / 2 - args.midhill_width)
+            midHillWidth = args.midhill_width
+    elif args.midhill_width is None:
+        footHillWidth = args.foothill_width
+        midHillWidth = max(0, riverSeparation / 2 - args.foothill_width)
+    else:
+        footHillWidth = args.foothill_width
+        midHillWidth = args.midhill_width
     
-    footHillGrade   = csmap.jr.uniform(0.10, 0.30)
-    midHillGrade    = csmap.jr.uniform(0.15, 0.45)
-    shoulderWidth   = csmap.jr.uniform(riverSeparation / 8, riverSeparation / 2)
-    shoulderGrade   = csmap.jr.uniform(0.30, 0.55)
-    peakGrade       = csmap.jr.uniform(0.45, 0.80)
+    footHillGrade   = (args.foothill_grade / 100 if args.foothill_grade is not None else
+                       csmap.jr.uniform(0.01, 0.20))
+    midHillGrade    = (args.midhill_grade / 100 if args.midhill_grade is not None else
+                       csmap.jr.uniform(0.15, 0.45))
+    shoulderWidth   = (args.shoulder_width if args.shoulder_width is not None else
+                       csmap.jr.uniform(riverSeparation / 8, riverSeparation / 2))
+    shoulderGrade   = (args.shoulder_grade / 100 if args.shoulder_grade is not None else
+                       csmap.jr.uniform(0.30, 0.55))
+    peakGrade       = (args.peak_grade / 100 if args.peak_grade is not None else
+                       csmap.jr.uniform(0.45, 0.80))
     
     print( "        SeaShore FloodPln FootHill MidHill  Shoulder    Peak")
     print(f" Width:          {floodPlainWidth:8.2f} {footHillWidth:8.2f} {midHillWidth:8.2f} {shoulderWidth:8.2f}")
@@ -423,7 +492,8 @@ if __name__ == '__main__':
 
     ## If this is not None, a river is generated from the nearest land point.
     ## All other rivers attempt to flow to this river.
-    forceRiver=(9000, 9000)
+    focalPossibilities = tuple((pID for pID, pPoint in csmap.enumerate_points() if csmap.level(pID) is not None and 4000 <= pPoint[0] <= 14000 and 4000 <= pPoint[1] <= 14000))
+    forceRiver=csmap.jr.choice(focalPossibilities)
     
     ## Next, create shorelines.  There are a lot of ways to do this.  We will
     ## create base boundaries by creating polygons, generating koch curves, and
@@ -491,15 +561,12 @@ if __name__ == '__main__':
     
     csmap.levelize()
 
-    if(forceRiver is not None):
+    if(forceRiver is not None and csmap.jr.randint(0,1) == 1):
         canRiver = tuple((pLevel is not None and pLevel is not False and
                           pLevel > riverSeparation / csmap.separate)
                          for pID, pLevel in csmap.enumerate_levels())
         
-        dist, pID = min(((iPoint[0]-forceRiver[0])**2 +
-                         (iPoint[1]-forceRiver[1])**2, iID) for iID, iPoint in csmap.enumerate_points())
-
-        csmap.add_river_source(pID)
+        csmap.add_river_source(forceRiver)
         csmap.levelize()
     else:
         canRiver = None
@@ -515,17 +582,17 @@ if __name__ == '__main__':
     print(f"Focusing rivers toward {focusPoint}")
     selectWeights = csmap.gen_select_weights(focusPoint)
 
-
-    for minRiverLength, viewStr in ((riverSeparation * 3, "major"),
-                                    (riverSeparation * 2, "minor"),
-                                    (riverSeparation * 1, "revis")):
+    
+    for minRiverLength, viewStr, allowedIDs in ((riverSeparation * 3, "major", canRiver),
+                                                (riverSeparation * 2, "minor", None),
+                                                (riverSeparation * 1, "revis", None)):
         maxLevel = csmap.extend_rivers(meterStr=viewStr,
                                        riverSeparation=riverSeparation,
                                        riverSegmentLength=riverSegmentLength,
                                        minRiverLength=minRiverLength,
-                                       maxIterations=400,
+                                       maxIterations=600,
                                        selectWeights=selectWeights,
-                                       allowedByID=canRiver)
+                                       allowedByID=allowedIDs)
         view = csmap.draw_levels(maxLevel=maxLevel)
         csmap.overlay_parcels(view)
         csmap.quickview(view, fname=f"out/cs.{viewStr}.png", keep=True)
@@ -568,7 +635,7 @@ if __name__ == '__main__':
                                    riverShoreOffsetMin=0,
                                    riverShoreOffsetMax=midHillWidth + shoulderWidth,
                                    riverShoreSqueeze=floodPlainWidth + footHillWidth,
-                                   maxIterations=400,
+                                   maxIterations=600,
                                    retarget=False)
 
     view = csmap.draw_levels(maxLevel=maxLevel)
@@ -582,6 +649,7 @@ if __name__ == '__main__':
                                    (floodPlainWidth + footHillWidth + midHillWidth + shoulderWidth, shoulderGrade)),
                                   drainMap=drains,
                                   sourceGrade=riverSourceGrade,
+                                  riverMinGrade=riverMinGrade,
                                   wrinkGrade=wrinkleGrade,
                                   shoreGrade=shoreGrade,
                                   peakGrade=peakGrade);
