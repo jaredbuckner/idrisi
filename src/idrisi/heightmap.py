@@ -70,17 +70,20 @@ class HeightMapper(levelmap.LevelMapper):
                     # q is lower than p
                     qMinSlope, qMaxSlope = slope_fn(self, qID)
                     minSlope, maxSlope = qMinSlope * dist, qMaxSlope * dist
+                    assert(minSlope <= maxSlope)
                     hlmap[(qID, pID)] = (minSlope, maxSlope)
                     hlmap[(pID, qID)] = (-maxSlope, -minSlope)
                 elif(self.is_lower(qLevel, pLevel)):
                     # p is lower than q
                     minSlope, maxSlope = pMinSlope * dist, pMaxSlope * dist
+                    assert(minSlope <= maxSlope)
                     hlmap[(pID, qID)] = (minSlope, maxSlope)
                     hlmap[(qID, pID)] = (-maxSlope, -minSlope)
                 else:
                     # p is equal-level to q
                     qMinSlope, qMaxSlope = slope_fn(self, qID)
                     maxSlope = min(pMaxSlope, qMaxSlope) * dist
+                    assert(0 <= maxSlope)
                     hlmap[(pID, qID)] = (-maxSlope, maxSlope)
                     hlmap[(qID, pID)] = (-maxSlope, maxSlope)
 
@@ -95,18 +98,13 @@ class HeightMapper(levelmap.LevelMapper):
         qIDMax = None
         
         for qID in self.neighbors(pID):
-            qHn, qHx = plmap[qID]
-            if(qID > pID):
-                ## del = qH - pH  =>  pH = qH - del
-                minDel, maxDel = hlmap[(pID, qID)]
-                pHx = qHx - minDel
-                pHn = qHn - maxDel
-            else:
-                ## del = pH - qH  =>  pH = qH + del
-                minDel, maxDel = hlmap[(qID, pID)]
-                pHx = qHx + maxDel
-                pHn = qHn + minDel
+            ## del = qH - pH  =>  pH = qH - del
 
+            qHn, qHx = plmap[qID]
+            minDel, maxDel = hlmap[(pID, qID)]
+            pHx = qHx - minDel
+            pHn = qHn - maxDel
+            
             if(newMin is None or newMin < pHn):                
                 newMin = pHn
                 qIDMin = qID
@@ -122,7 +120,7 @@ class HeightMapper(levelmap.LevelMapper):
     
     def gen_heights(self, slope_fn, sea_height, *,
                     maxHeight=8848, underwaterMul = 3,
-                    epsilon=0.1, selectRange=(0.5, 0.5),
+                    epsilon=0.001, selectRange=(0.5, 0.5),
                     skooshWithin=1, feedbackCB=_feedbackRpt):
 
         refractedMin = sea_height / underwaterMul
@@ -160,13 +158,13 @@ class HeightMapper(levelmap.LevelMapper):
                     invalids.update(self.neighbors(pID))
             
             if(not invalids and needsSkooshing):
-                skooshID, pID = min(enumerate(needsSkooshing), key=lambda entry:plmap[entry[1]][1] - plmap[entry[1]][0])
+                skooshID, pID = max(enumerate(needsSkooshing), key=lambda entry:plmap[entry[1]][1])
                 pID = needsSkooshing.pop(skooshID)
                 pHn, pHx = plmap[pID]
                 pWx = self._jr.uniform(selectRange[0], selectRange[1])
                 if pHx - pHn > skooshWithin:
-                    plmap[pID] = (pHn + skooshWithin * (1.0 - pWx),
-                                  pHx - skooshWithin * pWx)
+                    plmap[pID] = (pHn + skooshWithin * pWx,
+                                  pHx - skooshWithin * (1.0 - pWx))
                     needsSkooshing.insert(pID, 0)
                 else:
                     pHmid = pHx * pWx + pHn * (1.0 - pWx)

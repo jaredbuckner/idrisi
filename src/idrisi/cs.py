@@ -294,21 +294,18 @@ class CS(heightmap.HeightMapper):
         while True:
             print(f"I am relaxed:  {relax}")
 
-            def mms(*args):
-                n, x = slopeFn(*args)
-                return(n / relax, x)
             
             meter, meterCB = self.make_genheight_meter_with_cb()
             try:
-                self.gen_heights(mms, sea_height=-40, maxHeight=984,
-                                 selectRange=(0.4, 0.6),
+                self.gen_heights(slopeFn, sea_height=-40, maxHeight=984,
+                                 selectRange=(0.8 * relax, relax),
                                  feedbackCB=meterCB, skooshWithin=10)
                 
                 print(f"Final relaxation:  {relax}")
                 break
             except RuntimeError as e:
                 print(e)
-                relax *= 1.21
+                relax *= 0.90
             #except KeyboardInterrupt as e:
             #    print(e)
             #    relax *= 1.21                 
@@ -357,6 +354,76 @@ class CS(heightmap.HeightMapper):
                                                                        hmc(cID)))
         return view
 
+
+    def level_stats(self, combineRivers=False):
+        ## returns {level:  {'height': (n, min, mean, max, stddev),
+        ##                   'slope':  {level => (n, min, mean, max, stddev),
+        ##                              ...}
+        ##                   },
+        ##          ...}
+        retmap = dict()
+        for pID, pPoint in self.enumerate_points():
+            pLevel = self.level(pID)
+            if combineRivers and pLevel is not None and pLevel < 0:
+                pLevel = 0
+            
+            if pLevel not in retmap:
+                retmap[pLevel] = {'height': [],
+                                  'slope': {}}
+            levelmap = retmap[pLevel]
+            levelheights = levelmap['height']
+            levelslopemap = levelmap['slope']
+            
+            pHeight = self.height(pID)
+            levelheights.append(pHeight)
+
+            for qID in self.neighbors(pID):
+                qLevel = self.level(qID)
+                if combineRivers and qLevel is not None and qLevel < 0:
+                    qLevel = 0
+                
+                if qLevel not in levelslopemap:
+                    levelslopemap[qLevel] = []
+
+                qPoint = self.point(qID)
+                pqDel = (qPoint[0] - pPoint[0],
+                         qPoint[1] - pPoint[1])
+                pqDist = math.sqrt(pqDel[0] * pqDel[0] +
+                                   pqDel[1] * pqDel[1])
+
+                qHeight = self.height(qID)
+                pqSlope = (qHeight - pHeight) / pqDist
+
+                levelslopemap[qLevel].append(pqSlope)
+
+        def statistify(seqIter):
+            cnt = 0
+            summa = 0
+            sumsq = 0
+            n = None
+            x = None
+
+            for value in seqIter:
+                cnt += 1
+                summa += value
+                sumsq += value * value
+                if n is None or value < n:
+                    n = value
+                if x is None or value > x:
+                    x = value
+
+            mean = summa / cnt
+
+            return (cnt, n, mean, x, math.sqrt(sumsq/cnt - mean*mean))
+
+        for lv in retmap.values():
+            lv['height'] = statistify(lv['height'])
+            for svi in lv['slope'].keys():
+                lv['slope'][svi] = statistify(lv['slope'][svi])
+
+        return retmap
+
+        
         
 if __name__ == '__main__':
     import argparse
@@ -402,7 +469,7 @@ if __name__ == '__main__':
                         help="target grade of shoulder")
     parser.add_argument('--peak_grade', type=float, metavar='PCT', default=None,
                         help="target grade of highest peaks")
-    
+    parser.add_argument('--show_stats', action='store_true')
     
     
     args=parser.parse_args()
@@ -456,7 +523,7 @@ if __name__ == '__main__':
                        else csmap.jr.uniform(0.10, 0.50))
     floodPlainWidth = (args.flood_plain_width if args.flood_plain_width is not None
                        else csmap.jr.uniform(csmap.separate, riverSeparation * 3 / 4))
-    floodPlainGrade = (args.flood_plain_grade if args.flood_plain_grade is not None
+    floodPlainGrade = (args.flood_plain_grade / 100 if args.flood_plain_grade is not None
                        else csmap.jr.uniform(0.01, 0.03))
 
     ## Foothill + Midhill = riverSeparation / 2
@@ -662,6 +729,25 @@ if __name__ == '__main__':
     view = csmap.draw_heights(drainMap=drains)
     csmap.overlay_parcels(view)
     csmap.quickview(view, fname="out/cs.heights.png", keep=True)
-
+    
     view = csmap.draw_cs_heightmap()
     csmap.quickview(view, fname='out/cs.heightmap.png', keep=True)
+
+    if(args.show_stats):
+        levelstats = csmap.level_stats(combineRivers=True)
+
+        def fmtlevel(level):
+            return 'Sea' if level is None else f'{level:3d}'
+
+        for level, bits in sorted(levelstats.items(), key=lambda e:-math.inf if e[0] is None else e[0]):
+            cnt, n, m, x, d = bits['height']
+            print(f'{fmtlevel(level)} : {cnt:5d} {n:6.1f} < {m:6.1f} < {x:6.1f} | {d:6.2f}')
+
+            for tgt, bobs in sorted(bits['slope'].items(), key=lambda e:-math.inf if e[0] is None else e[0]):
+                cnt, n, m, x, d = bobs
+                ng = n / math.sqrt(1 + n * n)
+                mg = m / math.sqrt(1 + m * m)
+                xg = x / math.sqrt(1 + x * x)
+                dg = d / math.sqrt(1 + d * d)
+
+                print(f'      * {fmtlevel(tgt)} : {cnt:5d} {ng:6.2f} < {mg:6.2f} < {xg:6.2f} | {dg:6.2f}')
