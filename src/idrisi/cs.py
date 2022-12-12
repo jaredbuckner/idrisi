@@ -239,7 +239,7 @@ class CS(heightmap.HeightMapper):
         return self.max_level()
 
     def make_slope_fn(self, distGradeSeq, *,
-                      drainMap,
+                      drainMap, riverGradePower=2, riverFalloffPower=5,
                       shoreGrade, wrinkGrade, riverMinGrade, sourceGrade, peakGrade):
         landSlopes = list()
         for distance, grade in distGradeSeq:
@@ -260,8 +260,10 @@ class CS(heightmap.HeightMapper):
 
             if pLevel <= 0:
                 if pID in drainMap:
-                    dmag = 2 ** drainMap[pID] - 1
-                    return(0.0, 2 * max(riverMinGrade, sourceSlope / dmag))
+                    dmag = riverGradePower ** max(0, drainMap[pID] - 1)
+                    dfall = riverFalloffPower ** max(0, drainMap[pID] - 1)
+                    return(0.5 * max(riverMinGrade, sourceSlope / dmag),
+                           1.5 * max(riverMinGrade, sourceSlope / dmag))
 
                 else:
                     return(0.0, 2 * wrinkSlope)
@@ -294,11 +296,14 @@ class CS(heightmap.HeightMapper):
         while True:
             print(f"I am relaxed:  {relax}")
 
+            def _localSF(hmap, pID):
+                (n, x) = slopeFn(hmap, pID)
+                return(n * relax, x);            
             
             meter, meterCB = self.make_genheight_meter_with_cb()
             try:
-                self.gen_heights(slopeFn, sea_height=-40, maxHeight=984,
-                                 selectRange=(0.8 * relax, relax),
+                self.gen_heights(_localSF, sea_height=-40, maxHeight=984,
+                                 selectRange=(0.4, 0.6),
                                  feedbackCB=meterCB, skooshWithin=10)
                 
                 print(f"Final relaxation:  {relax}")
