@@ -41,79 +41,145 @@ class HeightMapper(levelmap.LevelMapper):
     def gen_height_limit_map(self, slope_fn):
         '''Given a function:
 
-          minSlope, maxSlope = slope_fn(hmap, pID)
+          minSlope, desiredSlope, maxSlope = slope_fn(pID)
 
-        ... generate a height limit map hlmap such that:
+        ... where minSlope sets the minimum required slope for a point of a
+        given level above all lower levels, maxSlope is the maximum allowed
+        slope for any connected point to pID, and desiredSlope is the desired
+        slope for a point of a given level above all lower levels, create a
+        height limit map hlmap such that:
 
-          minDelHeight, maxDelHeight = hlmap[(pID, qID)]
+          minDelHeight, desiredDelHeight, maxDelHeight = hlmap[(pID, qID)]
 
         ... where a valid heightmap is one for which all edges (pID, qID) obey the relationship
 
-        minDelHeight <= hmap.height(qID) - hmap.height(pID) <= maxDelHeight
+          minDelHeight <= hmap.height(qID) - hmap.height(pID) <= maxDelHeight
+
+        ... and a heightmap may be scored according to the sum of all errors:
+
+          (hmap.height(qID) - hmap.height(pID) - desiredDelHeight) ** 2
+
+        Note that minSlope, maxSlope, and desiredSlope are allowed to be None,
+        which indicates no restriction.  The appropriate hlmap entries will
+        also have a value of None.
+
+        slope_fn is not required to accept any argument for levels of False or
+        None.
+
         '''
 
         hlmap = dict()
         for pID, pPoint in self.enumerate_points():
             pLevel = self.level(pID)
-            pMinSlope, pMaxSlope = slope_fn(self, pID)
+
+            pMinSlope, pDesiredSlope, pMaxSlope = ((None, None, None) if pLevel is False or pLevel is None else
+                                                   slope_fn(pID))
+            assert(pMinSlope is None or pDesiredSlope is None or pMinSlope <= pDesiredSlope)
+            assert(pMaxSlope is None or pDesiredSlope is None or pDesiredSlope <= pMaxSlope)
+            assert(pMinSlope is None or pMaxSlope is None or pMinSlope <= pMaxSlope)
             
             for qID in self.neighbors(pID):
                 if qID <= pID:
                     continue
+                
                 qPoint = self.point(qID)
                 qLevel = self.level(qID)
-
+                
                 delPoint = (qPoint[0] - pPoint[0], qPoint[1] - pPoint[1])
                 dist = math.sqrt(delPoint[0] * delPoint[0] + delPoint[1] * delPoint[1])
-
+                assert(not math.isnan(dist))
+                
                 if(self.is_lower(pLevel, qLevel)):
                     # q is lower than p
-                    qMinSlope, qMaxSlope = slope_fn(self, qID)
-                    minSlope, maxSlope = qMinSlope * dist, qMaxSlope * dist
-                    assert(minSlope <= maxSlope)
-                    hlmap[(qID, pID)] = (minSlope, maxSlope)
-                    hlmap[(pID, qID)] = (-maxSlope, -minSlope)
+                    minDel = None if pMinSlope is None else pMinSlope * dist
+                    desDel = None if pDesiredSlope is None else pDesiredSlope * dist
+                    maxDel = None if pMaxSlope is None else pMaxSlope * dist
+                    minDelN = None if minDel is None else -minDel
+                    desDelN = None if desDel is None else -desDel
+                    maxDelN = None if maxDel is None else -maxDel
+                    #hlmap[(qID, pID)] = (minDel, desDel, maxDel)
+                    hlmap[(pID, qID)] = (maxDelN, desDelN, minDelN)
                 elif(self.is_lower(qLevel, pLevel)):
                     # p is lower than q
-                    minSlope, maxSlope = pMinSlope * dist, pMaxSlope * dist
-                    assert(minSlope <= maxSlope)
-                    hlmap[(pID, qID)] = (minSlope, maxSlope)
-                    hlmap[(qID, pID)] = (-maxSlope, -minSlope)
+                    qMinSlope, qDesiredSlope, qMaxSlope = ((None, None, None) if qLevel is False or qLevel is None else
+                                                           slope_fn(qID))
+                    
+                    minDel = None if qMinSlope is None else qMinSlope * dist
+                    desDel = None if qDesiredSlope is None else qDesiredSlope * dist
+                    maxDel = None if qMaxSlope is None else qMaxSlope * dist
+                    minDelN = None if minDel is None else -minDel
+                    desDelN = None if desDel is None else -desDel
+                    maxDelN = None if maxDel is None else -maxDel
+                    
+                    hlmap[(pID, qID)] = (minDel, desDel, maxDel)
+                    #hlmap[(qID, pID)] = (maxDelN, desDelN, minDelN)
                 else:
                     # p is equal-level to q
-                    qMinSlope, qMaxSlope = slope_fn(self, qID)
-                    maxSlope = min(pMaxSlope, qMaxSlope) * dist
-                    assert(0 <= maxSlope)
-                    hlmap[(pID, qID)] = (-maxSlope, maxSlope)
-                    hlmap[(qID, pID)] = (-maxSlope, maxSlope)
+                    maxDel = None if pMaxSlope is None else pMaxSlope * dist
+                    maxDelN = None if maxDel is None else -maxDel
 
-        return hlmap
-    
-    def _local_height_limits(self, pID, hlmap, plmap):
-        '''Returns (newMin, newMax)'''
+                    
+                    hlmap[(pID, qID)] = (maxDelN, None, maxDel)
+                    #hlmap[(qID, pID)] = (None, 0.0, None)
 
-        newMin = None
-        newMax = None
-        qIDMin = None
-        qIDMax = None
+        return hlmap       
         
-        for qID in self.neighbors(pID):
-            ## del = qH - pH  =>  pH = qH - del
+    
+    def _gen_height_errors(self, hlmap):
+        '''Returns (minArray, errSqArray, errDelArray, maxArray)'''
 
-            qHn, qHx = plmap[qID]
-            minDel, maxDel = hlmap[(pID, qID)]
-            pHx = qHx - minDel
-            pHn = qHn - maxDel
+        pointCount = self.point_count()
+        minArray = [None] * pointCount
+        errSqArray = [0.0] * pointCount
+        errDelArray = [0.0] * pointCount
+        maxArray = [None] * pointCount
+
+        for edge, properties in hlmap.items():
+            pID, qID = edge
+            minDel, desDel, maxDel = properties
             
-            if(newMin is None or newMin < pHn):                
-                newMin = pHn
-                qIDMin = qID
-            if(newMax is None or newMax > pHx):
-                newMax = pHx
-                qIDMax = qID
+            pHeight = self._height[pID]
+            qHeight = self._height[qID]
+            pqDel = qHeight - pHeight
 
-        return(newMin, newMax, qIDMin, qIDMax)
+            if(minDel is not None):
+                pMax = qHeight - minDel
+                if maxArray[pID] is None or pMax < maxArray[pID]:
+                    maxArray[pID] = pMax
 
+                qMin = pHeight + minDel
+                if minArray[qID] is None or minArray[qID] < qMin:
+                    minArray[qID] = qMin
+
+            if(maxDel is not None):
+                pMin = qHeight - maxDel
+                if minArray[pID] is None or minArray[pID] < pMin:
+                    minArray[pID] = pMin
+
+                qMax = pHeight + maxDel
+                if maxArray[qID] is None or qMax < maxArray[qID]:
+                    maxArray[qID] = qMax
+
+            if(desDel is not None):
+                err = pqDel - desDel
+                esq = err * err
+                errDel = 2 * err
+
+                if(not esq >= 0.0):
+                    print(f"FOOBAR! {pHeight} {qHeight} {pqDel} {desDel} {err} {esq}")
+                
+                assert(esq >= 0)
+
+                ## Account half the error to each node
+                errSqArray[pID] += esq / 2.0
+                errSqArray[qID] += esq / 2.0
+
+                ## Account for signage in correction factor
+                errDelArray[pID] -= errDel
+                errDelArray[qID] += errDel
+                
+        return (minArray, errSqArray, errDelArray, maxArray)
+    
     @staticmethod
     def _feedbackRpt(numInvalids, numUnskooshed, totalMapSize):
         print(f'I({numInvalids}) S({numUnskooshed}) T({totalMapSize})')
@@ -123,65 +189,121 @@ class HeightMapper(levelmap.LevelMapper):
                     epsilon=0.001, selectRange=(0.5, 0.5),
                     skooshWithin=1, feedbackCB=_feedbackRpt):
 
+        alpha = 0.49
+        maxStep = 2.0
+        ignoreLimits = False
+        
         refractedMin = sea_height / underwaterMul
         
         hlmap = self.gen_height_limit_map(slope_fn)
-        plmap = list((refractedMin, refractedMin) if pLevel is None or pLevel is False else (refractedMin, maxHeight) for pID, pLevel in self.enumerate_levels())
+        for pID, pLevel in self.enumerate_levels():
+            if pLevel is None or pLevel is False:
+                self._height[pID] = refractedMin
+
+        tErrArray = [None] * 100
+        maxIter = 1000
+        iterCnt = 0
+        isValid = False
         
-        invalids = set(pID for pID,pLevel in self.enumerate_levels() if pLevel is not None and pLevel is not False)
-        needsSkooshing = list(invalids)
-        
-        while(invalids):
-            shuffledinvalids = list(invalids)
-            self._jr.shuffle(shuffledinvalids)
-            if feedbackCB is not None:
-                feedbackCB(len(invalids), len(needsSkooshing), len(plmap))
+        while(iterCnt < maxIter):
+            iterCnt += 1
+            minArray, errSqArray, errDelArray, maxArray = self._gen_height_errors(hlmap)
+
+            invalidCnt = 0
+            totalErr = 0;
+            worstErr = 0;
+            biggestStep = 0;
             
-            for pID in shuffledinvalids:
-                invalids.remove(pID)
-                pHn, pHx = plmap[pID]
-                newMin, newMax, qIDMin, qIDMax = self._local_height_limits(pID, hlmap, plmap)
+            for pID, pData in enumerate(zip(minArray, errSqArray, errDelArray, maxArray)):
+                localInvalid = False
+                
+                pMin, pErrSq, pErrDel, pMax = pData
+                pLevel = self.level(pID)
 
-                if(newMin > newMax + epsilon or newMin > pHx + epsilon or pHn > newMax + epsilon):
-                    raise RuntimeError(f"For pID={pID} at level {self.level(pID)} with limits ({pHn}, {pHx}), the surrounding points have created impossible limits ({newMin} from level {self.level(qIDMin)}, {newMax} from level {self.level(qIDMax)})!")
+                if(pMin is None or pMin < refractedMin):
+                    pMin = refractedMin
 
-                changed = False
-                if(newMin > pHn + epsilon):
-                    changed = True
-                    pHn = newMin
-                if(newMax < pHx - epsilon):
-                    changed = True
-                    pHx = newMax
+                if(pMax is None or pMax > maxHeight):
+                    pMax = maxHeight
+                
+                if pMin > pMax:
+                    localInvalid = True
+                    invalidCnt += 1
 
-                if changed:
-                    plmap[pID] = (pHn, pHx)
-                    invalids.update(self.neighbors(pID))
+                if pLevel is None or pLevel is False:
+                    continue
+                
+                if(not ignoreLimits):
+                    if(self._height[pID] < pMin):
+                        if(pMin - self._height[pID] < 1.0):
+                            self._height[pID] = pMin
+                        else:
+                            self._height[pID] = (self._height[pID] + pMin) / 2.0
+                        continue
+                    if(self._height[pID] > pMax):
+                        if(self._height[pID] - pMax < 1.0):
+                            self._height[pID] = pMax
+                        else:
+                            self._height[pID] = (self._height[pID] + pMax) / 2.0
+                            
+                        continue
+                        
+                if pErrSq is not None and pErrDel is not None:
+                    localErr = math.sqrt(pErrSq)
+                    if(not pErrSq >= 0.0):
+                        print(f'AAAH! {pErrSq}')
+                    
+                    assert(not math.isnan(localErr))
+                    totalErr += localErr
+                    if(localErr > worstErr):
+                        worstErr = localErr
+
+                    assert(not math.isnan(pErrDel))
+                    step = -pErrDel / 2.0  ## The double-derivative for each
+                                           ## error type is a constant 2
+                    if abs(step) > abs(biggestStep):
+                        biggestStep = step
+
+                    assert(not math.isnan(alpha))
+                    step *= alpha
+
+                    if step > maxStep:
+                        step = maxStep
+                    elif step < -maxStep:
+                        step = -maxStep
+
+                    assert(not math.isnan(step))
+                        
+                    self._height[pID] += step
+                
+            print(f'C:{iterCnt} I:{invalidCnt} T:{totalErr} W:{worstErr} S:{biggestStep}')
+
+            if(biggestStep < -maxStep or maxStep < biggestStep):
+                alpha *= 0.9
+            else:
+                alpha *= 1.2
             
-            if(not invalids and needsSkooshing):
-                skooshID, pID = max(enumerate(needsSkooshing), key=lambda entry:plmap[entry[1]][1])
-                pID = needsSkooshing.pop(skooshID)
-                pHn, pHx = plmap[pID]
-                pWx = self._jr.uniform(selectRange[0], selectRange[1])
-                if pHx - pHn > skooshWithin:
-                    plmap[pID] = (pHn + skooshWithin * pWx,
-                                  pHx - skooshWithin * (1.0 - pWx))
-                    needsSkooshing.insert(pID, 0)
-                else:
-                    pHmid = pHx * pWx + pHn * (1.0 - pWx)
-                    plmap[pID] = (pHmid, pHmid)
-                invalids.update(self.neighbors(pID))
+            #alpha = abs(maxStep / biggestStep)
+            
+            if(ignoreLimits or invalidCnt == 0):
+                if totalErr == 0 or (tErrArray[0] is not None and tErrArray[0] <= totalErr):
+                    isValid = True
+                    break
+                
+                tErrArray.append(totalErr)
+                del tErrArray[0]
 
-
-        for pID, limits in enumerate(plmap):
-            pHn, pHx = limits
-            self._height[pID] = (pHn + pHx) / 2.0
-        
         for pID in range(self.point_count()):
             if self._height[pID] < 0:
                 self._height[pID] *= underwaterMul
-                
+        
         self._update_height_stats()
-
+        return isValid
+    
+    def anneal(self, stddev, r):
+        for pID in range(self.point_count()):
+            self._height[pID] += r.uniform(-2 * stddev, 2 * stddev)
+    
     def height_color(self, pID):
         height = self._height[pID]
         if(height <= 0):
@@ -246,8 +368,16 @@ class _ut_HeightMapper(unittest.TestCase):
                         edge_color_fn = lambda pID, qID: (hmap.level_color(pID, maxLevel=ml),
                                                           hmap.level_color(qID, maxLevel=ml)))
         self.quickview(view)
+
+        for adev in (0.0, 5.0, 2.0):
+            if(adev > 0.0):
+                hmap.anneal(adev, self.jr)
+            
+            hmap.gen_heights(lambda pID: (0, 0.01, 1) if hmap.level(pID) <= 0 else (0, 0.30, 1), -40, maxHeight=984, selectRange=(0.0, 1.0))
+            # hmap.gen_heights(lambda pID: (0, None, 0.10) if hmap.level(pID) <= 0 else (0, None, 0.60), -40, maxHeight=984, selectRange=(0.0, 1.0))
+            
+
         
-        hmap.gen_heights(lambda hmap, pID: (0.00, 0.02) if hmap.level(pID) is None or hmap.level(pID) is False else (0.001, 0.05) if hmap.level(pID) <= 0 else (0.03, 0.50), -40, maxHeight=984, selectRange=(0.0, 1.0))
         print(f'{hmap._lowest} - {hmap._highest}')
         
         def edge_color_fn(pID, qID):

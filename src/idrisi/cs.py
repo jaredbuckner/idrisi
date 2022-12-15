@@ -239,7 +239,7 @@ class CS(heightmap.HeightMapper):
         return self.max_level()
 
     def make_slope_fn(self, distGradeSeq, *,
-                      drainMap, riverGradePower=2, riverFalloffPower=5,
+                      drainMap, riverGradePower=2,
                       shoreGrade, wrinkGrade, riverMinGrade, sourceGrade, peakGrade):
         landSlopes = list()
         for distance, grade in distGradeSeq:
@@ -252,27 +252,24 @@ class CS(heightmap.HeightMapper):
         sourceSlope = sourceGrade / math.sqrt(1 - sourceGrade*sourceGrade)
         peakSlope = peakGrade / math.sqrt(1 - peakGrade*peakGrade)
 
-        def _slope_fn(hmap, pID):
-            pLevel = hmap.level(pID)
+        def _slope_fn(pID):
+            pLevel = self.level(pID)
 
-            if pLevel is None or pLevel is False:
-                return(0.0, 2 * shoreSlope)
+            assert(pLevel is not None and pLevel is not False)
 
             if pLevel <= 0:
                 if pID in drainMap:
                     dmag = riverGradePower ** max(0, drainMap[pID] - 1)
-                    dfall = riverFalloffPower ** max(0, drainMap[pID] - 1)
-                    return(0.5 * max(riverMinGrade, sourceSlope / dmag),
-                           1.5 * max(riverMinGrade, sourceSlope / dmag))
-
+                    return(riverMinGrade, max(riverMinGrade, sourceSlope / dmag), None)
+                
                 else:
-                    return(0.0, 2 * wrinkSlope)
+                    return(0.1*wrinkSlope, wrinkSlope, 1)
 
             for landLevel, landSlope in landSlopes:
                 if pLevel <= landLevel:
-                    return(0.0, 2 * landSlope)
+                    return(0.1*landSlope, landSlope, 1)
 
-            return(0.0, 2 * peakSlope)
+            return(0.1 * peakSlope, peakSlope, 1.5)
 
         return(_slope_fn)
 
@@ -296,15 +293,13 @@ class CS(heightmap.HeightMapper):
         while True:
             print(f"I am relaxed:  {relax}")
 
-            def _localSF(hmap, pID):
-                (n, x) = slopeFn(hmap, pID)
-                return(n * relax, x);            
-            
             meter, meterCB = self.make_genheight_meter_with_cb()
             try:
-                self.gen_heights(_localSF, sea_height=-40, maxHeight=984,
-                                 selectRange=(0.4, 0.6),
-                                 feedbackCB=meterCB, skooshWithin=10)
+                for adev in (0.0, 15.0, 5.0, 2.0):
+                    self.anneal(adev, self.jr)            
+                    self.gen_heights(slopeFn, sea_height=-40, maxHeight=984,
+                                     selectRange=(0.4, 0.6),
+                                     feedbackCB=meterCB, skooshWithin=10)
                 
                 print(f"Final relaxation:  {relax}")
                 break
