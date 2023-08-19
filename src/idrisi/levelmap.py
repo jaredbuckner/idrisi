@@ -171,10 +171,9 @@ class LevelMapper(delmap.DelMapper):
         return result
 
     def is_lower(self, pLevel, qLevel):
-        ## Returns true if qLevel is lower than pLevel
+        ## Returns true if qLevel is not False and qLevel is lower than pLevel
         return(pLevel is not None and
-               (qLevel is None or
-                (qLevel is not None and qLevel < pLevel)));
+               (qLevel is None or qLevel < pLevel));
     
     def min_level(self):
         return self.min_max_level()[0]
@@ -197,6 +196,29 @@ class LevelMapper(delmap.DelMapper):
 
         return(nl, xl)
 
+    def neighbor_levels(self, pID):
+        yield from ((qID, self.level(qID)) for qID in self.neighbors(pID));
+
+    def drain_levels(self, pID):
+        pLevel = self.level(pID);
+        yield from ((qID, qLevel) for qID, qLevel in self.neighbor_levels(pID)
+                    if (pLevel is False or qLevel is not False and self.is_lower(pLevel, qLevel)));
+
+    ## The canonial drain for this point, or None if no lower point exists
+    def drain(self, pID):
+        dID = None;
+        dLevel = None;
+        pLevel = self.level(pID)
+
+        for qID, qLevel in self.drain_levels(pID):
+            if(self.is_lower(pLevel, qLevel) and
+               (dID is None or self.is_lower(dLevel, qLevel))):
+                dID = qID;
+                dLevel = qLevel;
+
+        return(dID);
+
+    ## Construct a level from the neigbors
     def _level_from_neighbors(self, pID, *,
                               seaShoreMin=1, seaShoreMax=1,
                               riverShoreMin=1, riverShoreMax=1,
@@ -206,16 +228,15 @@ class LevelMapper(delmap.DelMapper):
         seaSpan = seaShoreMax - seaShoreMin + 1
         riverSpan = riverShoreMax - riverShoreMin + 1
         
-        for qID in self.neighbors(pID):
-            qLevel = self._level[qID]
+        for qID, qLevel in self.neighbor_levels(pID):
             if qLevel is False:
                 continue
             if(qLevel is None):
-                seaLevel = pID % seaSpan + seaShoreMin - 1
+                seaLevel = pID % seaSpan + seaShoreMin - 1  ## Subtract one to add it later
                 if nLevel is None or nLevel > seaLevel:
                     nLevel = seaLevel
             elif(qLevel <= 0):
-                riverLevel = riverLiftFn(qLevel) + pID % riverSpan + riverShoreMin - 1
+                riverLevel = riverLiftFn(qLevel) + pID % riverSpan + riverShoreMin - 1  ## Subtract 1 to add it later
                 if nLevel is None or nLevel > riverLevel:
                     nLevel = riverLevel
             else:
@@ -223,12 +244,13 @@ class LevelMapper(delmap.DelMapper):
                     nLevel = qLevel
 
         return nLevel if nLevel is None else nLevel + 1
-        
+
+    
     def is_valid_level(self, pID, **kwargs):
         ## Check a point and return True if the level value for this point
         ## exists and obeys all rules, False otherwise
         
-        pLevel = self._level[pID]
+        pLevel = self.level(pID)
 
         ## Empty level is not valid
         if pLevel is False:
@@ -237,17 +259,23 @@ class LevelMapper(delmap.DelMapper):
         ## Sea level is always valid
         if pLevel is None:
             return(True)
+
+        ## Otherwise we need a drain:
+        dID = self.drain(pID)
+
+        if(dID is None):
+            return(False)
         
-        ## Rivers must have an outflow
-        if(pLevel <= 0):            
-            return(any(self.is_lower(pLevel, self._level[qID])
-                       for qID in self.neighbors(pID) if self._level[qID] is not False))
+        ## Rivers must have an outflow.  Having a drain proves this.
+        if(pLevel <= 0):
+            return True
         
         ## Non-shore land must be one level one higher than its lowest neighbor
         ##
-        pOughtToBe = self._level_from_neighbors(pID, **kwargs)
-        return pOughtToBe is not None and pOughtToBe == pLevel
-
+        dLevel = self.level(dID);
+        return(dLevel is None or dLevel <=0 or dLevel == pLevel - 1)
+    
+    
     def levelizables(self, **kwargs):
         yield from (pID for pID, pPoint in self.enumerate_points() if
                     not self.is_valid_level(pID, **kwargs) and
@@ -268,24 +296,16 @@ class LevelMapper(delmap.DelMapper):
     
     def add_river_source(self, pID, skip=0):
         ## Set skip to the number of levels to skip over before adding river
-        pLevel = self._level[pID]
+        pLevel = self.level(pID)
         river = list()
         while(pLevel is not None and pLevel > -len(river)):
             if(skip > 0):
                 skip -= 1
             else:
                 river.append(pID)
-            
-            lowID = None
-            lowLevel = None
-            for qID in self.neighbors(pID):
-                qLevel = self.level(qID)
-                if self.is_lower(pLevel, qLevel) and (lowID is None or self.is_lower(lowLevel, qLevel)):
-                    lowID = qID
-                    lowLevel = qLevel
 
-            pID = lowID
-            pLevel = lowLevel
+            pID = self.drain(pID)
+            pLevel = self.level(pID)
 
         for negLevel, pID in enumerate(river):
             self._level[pID] = -negLevel
@@ -354,7 +374,9 @@ class LevelMapper(delmap.DelMapper):
 
             return tuple(a * wf + b * wc for a,b in zip(LevelMapper._landColorSeq[cfidx],
                                                         LevelMapper._landColorSeq[ccidx]))
+
     
+    ## This generates the number of upstream branches that flow into each river point
     def gen_drain_levels(self):
         drains = dict()
 
@@ -566,7 +588,7 @@ class _ut_LevelMapper(unittest.TestCase):
                 lmap.levelize()
                 nines = list(pID for pID,lev in enumerate(lmap._level) if lev == turn)
 
-        lmap.remove_river_stubs(12)
+        #lmap.remove_river_stubs(12)
         
         for shoreLevel in (1, 5, 1):
             lmap.levelize(seaShoreMax=shoreLevel)
