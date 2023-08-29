@@ -357,36 +357,47 @@ class LevelMapper(delmap.DelMapper):
 
     def remove_river_stubs(self, minLength):
         ## Look for forks, mark for deletion
-        toDelete = set()
-        for pID, pLevel in enumerate(self._level):
-            if pLevel is None or pLevel is False or pLevel < 0:
-                longInBranches = list()
-                shortInBranches = list()
-                
-                for qID in self.neighbors(pID):
-                    qLevel = self._level[qID]
-                    if (qLevel is not None and
-                        (pLevel is None or pLevel is False or pLevel < qLevel) and
-                        qLevel < 1):
-                        if -qLevel < minLength:
-                            shortInBranches.append(qID)
-                        else:
-                            longInBranches.append(qID)
-                if(pLevel is None or pLevel is False or longInBranches):
-                    toDelete.update(shortInBranches)
-                else:
-                    toDelete.update(shortInBranches[1:])
+        toDelete = list()
+        for pID, pLevel in self.enumerate_levels():
+            if pLevel is None or pLevel <= -minLength:
+                ## Not a riverine node less than the minimum length
+                continue
 
+            qID = self.drain(pID)            
+            qLevel = self.level(qID)
+            if(qLevel is None):
+                ## Drains into the sea
+                toDelete.append(pID)
+                continue
+
+            ## Look at all the neighbors of qID.  We will keep pID if it is the
+            ## first riverine node which drains into qID.  We will remove it
+            ## otherwise.
+            for rID in self.neighbors(qID):
+                if(rID == pID):
+                    ## We were first!  Great!
+                    break
+                
+                rLevel = self.level(rID)
+                if rLevel is None or rLevel > 0:
+                    ## Not a riverine node
+                    continue
+                
+                if self.drain(rID) == qID:
+                    ## Another drain, we were not first
+                    toDelete.append(pID)
+                    break
+                
         # Delete
         while(toDelete):
             pID = toDelete.pop()
-            pLevel = self._level[pID]
-            self._level[pID] = False
             for qID in self.neighbors(pID):
-                qLevel = self._level[qID]
-                if(qLevel is not None and qLevel is not False and pLevel < qLevel < 1):
-                    toDelete.add(qID)
+                if(self.drain(qID) == pID):
+                    toDelete.append(qID)
 
+            self._level[pID] = False
+
+        
     def level_color(self, pID, *, maxLevel=1):
         
         level = self._level[pID]
@@ -620,14 +631,14 @@ class _ut_LevelMapper(unittest.TestCase):
 
         lmap.levelize()
         
-        for turn in (7,):
+        for turn in (9, 7, 5):
             nines = list(pID for pID,lev in enumerate(lmap._level) if lev == turn)
             while(nines):
                 lmap.add_river_source(self.jr.choice(nines))
                 lmap.levelize()
                 nines = list(pID for pID,lev in enumerate(lmap._level) if lev == turn)
         
-        lmap.remove_river_stubs(12)
+        lmap.remove_river_stubs(6)
         lmap.levelize()
         
         for shoreLevel in (1, 5, 1):

@@ -291,7 +291,7 @@ class CS(heightmap.HeightMapper):
     def gen_heights_really_hard(self, slopeFn):
         meter, meterCB = self.make_genheight_meter_with_cb()
         self.gen_heights(slopeFn, sea_height=-40, maxHeight=984,
-                         selectRange=(0.3, 0.7),
+                         selectRange=(0.45, 0.55),
                          completedCB=meterCB)
         
         meter.close()
