@@ -170,10 +170,53 @@ class LevelMapper(delmap.DelMapper):
 
         return result
 
-    def is_lower(self, pLevel, qLevel):
-        ## Returns true if qLevel is not False and qLevel is lower than pLevel
-        return(pLevel is not None and
-               (qLevel is None or qLevel < pLevel));
+    def cmp(self, pLevel, qLevel):
+        ## Returns False if either level is False,
+        ## negative if pLevel is lower than qLevel,
+        ## positive if qLevel is lower than pLevel,
+        ## or zero if they are equilevel.
+        if(pLevel is False or qLevel is False):
+            return False;
+        if(pLevel is None):
+            if(qLevel is None):
+                return 0
+            else:
+                return -1
+        if(qLevel is None):
+            return 1
+        if(pLevel < qLevel):
+            return -1
+        if(qLevel < pLevel):
+            return 1
+        return 0
+
+    def is_decreasing(self, pLevel, qLevel):
+        ## Returns True if pLevel is not False and qLevel is not False and
+        ## qLevel is lower than pLevel
+        cv = self.cmp(pLevel, qLevel);
+        return(False if cv is False else
+               cv == 1)
+    
+    def is_increasing(self, pLevel, qLevel):
+        ## Returns True if pLevel is not False and qLevel is not False and
+        ## qLevel is higher than pLevel
+        cv = self.cmp(pLevel, qLevel);
+        return(False if cv is False else
+               cv == -1)
+    
+    def is_not_decreasing(self, pLevel, qLevel):
+        ## Returns True if pLevel is not False and qLevel is not False and
+        ## qLevel is not lower than pLevel
+        cv = self.cmp(pLevel, qLevel);
+        return(False if cv is False else
+               cv != 1)
+            
+    def is_not_increasing(self, pLevel, qLevel):
+        ## Returns True if pLevel is not False and qLevel is not False and
+        ## qLevel is not higher than pLevel
+        cv = self.cmp(pLevel, qLevel);
+        return(False if cv is False else
+               cv != -1)
     
     def min_level(self):
         return self.min_max_level()[0]
@@ -189,21 +232,22 @@ class LevelMapper(delmap.DelMapper):
         xl=False
 
         for pID, level in enumerate(self._level):
-            if(nl is False or nl is None or (level is not False and level is not None and level < nl)):
-                nl = level
-            if(xl is False or xl is None or (level is not False and level is not None and level > xl)):
-                xl = level
+            if(nl is False or self.is_decreasing(nl, level)):
+               nl = level
 
+            if(xl is False or self.is_increasing(xl, level)):
+               xl = level
+               
         return(nl, xl)
 
     def neighbor_levels(self, pID):
-        yield from ((qID, self.level(qID)) for qID in self.neighbors(pID));
+        yield from ((qID, self.level(qID)) for qID in self.neighbors(pID))
 
     def drain_levels(self, pID):
-        pLevel = self.level(pID);
+        pLevel = self.level(pID)
         yield from ((qID, qLevel) for qID, qLevel in self.neighbor_levels(pID)
-                    if (pLevel is False or qLevel is not False and self.is_lower(pLevel, qLevel)));
-
+                    if self.is_decreasing(pLevel, qLevel))
+        
     ## The canonial drain for this point, or None if no lower point exists
     def drain(self, pID):
         dID = None;
@@ -211,13 +255,13 @@ class LevelMapper(delmap.DelMapper):
         pLevel = self.level(pID)
 
         for qID, qLevel in self.drain_levels(pID):
-            if(self.is_lower(pLevel, qLevel) and
-               (dID is None or self.is_lower(dLevel, qLevel))):
-                dID = qID;
-                dLevel = qLevel;
-
+            if(self.is_decreasing(pLevel, qLevel) and
+               (dID is None or self.is_decreasing(qLevel, dLevel))):
+                dID = qID
+                dLevel = qLevel
+                
         return(dID);
-
+    
     ## Construct a level from the neigbors
     def _level_from_neighbors(self, pID, *,
                               seaShoreMin=1, seaShoreMax=1,
@@ -266,20 +310,21 @@ class LevelMapper(delmap.DelMapper):
         if(dID is None):
             return(False)
         
-        ## Rivers must have an outflow.  Having a drain proves this.
-        if(pLevel <= 0):
+        ## River sources must have an outflow.  Having a drain proves this.
+        if(pLevel == 0):
             return True
-        
-        ## Non-shore land must be one level one higher than its lowest neighbor
-        ##
-        dLevel = self.level(dID);
-        return(dLevel is None or dLevel <=0 or dLevel == pLevel - 1)
-    
+
+        ## River segments must have an inflow that is one higher
+        if(pLevel < 0):
+            return(any(qLevel == pLevel + 1 for qId,qLevel in self.neighbor_levels(pID)))
+
+        ## Non-shore land must be correctly leveled
+        return(pLevel == self._level_from_neighbors(pID, **kwargs))
     
     def levelizables(self, **kwargs):
         yield from (pID for pID, pPoint in self.enumerate_points() if
                     not self.is_valid_level(pID, **kwargs) and
-                    any(self.is_valid_level(qID, **kwargs) for qID in self.neighbors(pID)))    
+                    any(self.is_valid_level(qID, **kwargs) for qID in self.neighbors(pID)))
         
     def levelize(self, **kwargs):
         invalids = set(self.levelizables(**kwargs))
@@ -380,23 +425,17 @@ class LevelMapper(delmap.DelMapper):
     def gen_drain_levels(self):
         drains = dict()
 
-        for pID, pLevel in enumerate(self._level):            
+        for pID, pLevel in enumerate(self._level):
             if pLevel == 0:
-                streamsIn = {pID: pLevel}
-                streamsOut = set()
-                while(streamsIn):
-                    pID, pLevel = streamsIn.popitem()
-                    streamsOut.add(pID)
-                    for qID in self.neighbors(pID):
-                        qLevel = self._level[qID]
-                        if qLevel is not None and qLevel is not False and self.is_lower(pLevel, qLevel):
-                            streamsIn[qID] = qLevel
-
-                for pID in streamsOut:
-                    drains[pID] = drains.get(pID, 0) + 1
+                qID = pID
+                qLevel = pLevel
+                while(qLevel is not None):
+                    drains[qID] = drains.get(qID, 0) + 1
+                    qID = self.drain(qID)
+                    qLevel = self.level(qID)
                     
         return drains                    
-                
+    
 class _ut_LevelMapper(unittest.TestCase):
     def setUp(self):
         self.jr = jrandom.JRandom();
@@ -587,8 +626,9 @@ class _ut_LevelMapper(unittest.TestCase):
                 lmap.add_river_source(self.jr.choice(nines))
                 lmap.levelize()
                 nines = list(pID for pID,lev in enumerate(lmap._level) if lev == turn)
-
-        #lmap.remove_river_stubs(12)
+        
+        lmap.remove_river_stubs(12)
+        lmap.levelize()
         
         for shoreLevel in (1, 5, 1):
             lmap.levelize(seaShoreMax=shoreLevel)
@@ -600,7 +640,9 @@ class _ut_LevelMapper(unittest.TestCase):
             ## Super simple drains mechanism
             drains = lmap.gen_drain_levels()
             #print(drains)
-            maxDrains = max(l for pID, l in drains.items())
+            maxDrains = 1;
+            if(drains):
+                maxDrains = max(l for pID, l in drains.items())
             drInterp = jutil.make_linear_interp(0, maxDrains)
             def drColor(dr):
                 aW, bW = drInterp(dr)

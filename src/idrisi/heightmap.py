@@ -9,6 +9,7 @@ import PIL.Image
 import subprocess
 import unittest
 
+
 class HeightMapper(levelmap.LevelMapper):
     _seacolors = ((0x00, 0x00, 0x83),
                  (0x00, 0xFB, 0xFF))
@@ -37,31 +38,26 @@ class HeightMapper(levelmap.LevelMapper):
 
         self._scinterp = jutil.make_array_interp(len(HeightMapper._seacolors), min(self._lowest, -0.01), 0.0)
         self._lcinterp = jutil.make_array_interp(len(HeightMapper._landcolors), 0.0, max(0.01, self._highest))
-
+    
     def gen_height_limit_map(self, slope_fn):
         '''Given a function:
 
-          minSlope, desiredSlope, maxSlope = slope_fn(pID)
+          minSlope, maxSlope = slope_fn(pID)
 
         ... where minSlope sets the minimum required slope for a point of a
-        given level above all lower levels, maxSlope is the maximum allowed
-        slope for any connected point to pID, and desiredSlope is the desired
-        slope for a point of a given level above all lower levels, create a
-        height limit map hlmap such that:
+        given level above all lower levels, and maxSlope is the maximum allowed
+        slope for any connected point to pID, create a height limit map hlmap
+        such that:
 
-          minDelHeight, desiredDelHeight, maxDelHeight = hlmap[(pID, qID)]
+          minDelHeight, maxDelHeight = hlmap[(pID, qID)]
 
         ... where a valid heightmap is one for which all edges (pID, qID) obey the relationship
 
           minDelHeight <= hmap.height(qID) - hmap.height(pID) <= maxDelHeight
 
-        ... and a heightmap may be scored according to the sum of all errors:
-
-          (hmap.height(qID) - hmap.height(pID) - desiredDelHeight) ** 2
-
-        Note that minSlope, maxSlope, and desiredSlope are allowed to be None,
-        which indicates no restriction.  The appropriate hlmap entries will
-        also have a value of None.
+        Note that minSlope, and maxSlope are allowed to be None, which
+        indicates no restriction.  The appropriate hlmap entries will also have
+        a value of None.
 
         slope_fn is not required to accept any argument for levels of False or
         None.
@@ -72,11 +68,10 @@ class HeightMapper(levelmap.LevelMapper):
         for pID, pPoint in self.enumerate_points():
             pLevel = self.level(pID)
 
-            pMinSlope, pDesiredSlope, pMaxSlope = ((None, None, None) if pLevel is False or pLevel is None else
-                                                   slope_fn(pID))
-            assert(pMinSlope is None or pDesiredSlope is None or pMinSlope <= pDesiredSlope)
-            assert(pMaxSlope is None or pDesiredSlope is None or pDesiredSlope <= pMaxSlope)
-            assert(pMinSlope is None or pMaxSlope is None or pMinSlope <= pMaxSlope)
+            pSlopeInvl = ((None, None) if pLevel is False or pLevel is None else
+                          slope_fn(pID))
+
+            assert(jutil.invl_valid(pSlopeInvl))
             
             for qID in self.neighbors(pID):
                 if qID <= pID:
@@ -88,221 +83,114 @@ class HeightMapper(levelmap.LevelMapper):
                 delPoint = (qPoint[0] - pPoint[0], qPoint[1] - pPoint[1])
                 dist = math.sqrt(delPoint[0] * delPoint[0] + delPoint[1] * delPoint[1])
                 assert(not math.isnan(dist))
+
+                pq_cmp = self.cmp(pLevel, qLevel)
                 
-                if(self.is_lower(pLevel, qLevel)):
+                if(pq_cmp > 0):
                     # q is lower than p
-                    minDel = None if pMinSlope is None else pMinSlope * dist
-                    desDel = None if pDesiredSlope is None else pDesiredSlope * dist
-                    maxDel = None if pMaxSlope is None else pMaxSlope * dist
-                    minDelN = None if minDel is None else -minDel
-                    desDelN = None if desDel is None else -desDel
-                    maxDelN = None if maxDel is None else -maxDel
-                    #hlmap[(qID, pID)] = (minDel, desDel, maxDel)
-                    hlmap[(pID, qID)] = (maxDelN, desDelN, minDelN)
-                elif(self.is_lower(qLevel, pLevel)):
+                    qpInvl = jutil.invl_scale(pSlopeInvl, dist)
+                    assert(jutil.invl_valid(qpInvl))
+                    hlmap[(pID, qID)] = jutil.invl_conj(qpInvl)
+                    
+                elif(pq_cmp < 0):
                     # p is lower than q
-                    qMinSlope, qDesiredSlope, qMaxSlope = ((None, None, None) if qLevel is False or qLevel is None else
-                                                           slope_fn(qID))
-                    
-                    minDel = None if qMinSlope is None else qMinSlope * dist
-                    desDel = None if qDesiredSlope is None else qDesiredSlope * dist
-                    maxDel = None if qMaxSlope is None else qMaxSlope * dist
-                    minDelN = None if minDel is None else -minDel
-                    desDelN = None if desDel is None else -desDel
-                    maxDelN = None if maxDel is None else -maxDel
-                    
-                    hlmap[(pID, qID)] = (minDel, desDel, maxDel)
-                    #hlmap[(qID, pID)] = (maxDelN, desDelN, minDelN)
+                    qSlopeInvl = ((None,None) if qLevel is False or qLevel is None else
+                                  slope_fn(qID))
+                    assert(jutil.invl_valid(qSlopeInvl))
+
+                    pqInvl = jutil.invl_scale(qSlopeInvl, dist)
+                    assert(jutil.invl_valid(pqInvl))
+                    hlmap[(pID, qID)] = pqInvl
                 else:
                     # p is equal-level to q
-                    maxDel = None if pMaxSlope is None else pMaxSlope * dist
-                    maxDelN = None if maxDel is None else -maxDel
+                    maxDel = None
+                    if(pSlopeInvl[0] is not None):
+                        maxDel = abs(pSlopeInvl[0])
 
+                    if(pSlopeInvl[1] is not None and
+                       (maxDel is None or abs(pSlopeInvl[1]) > maxDel)):
+                        maxDel = abs(pSlopeInvl[1])
+                        
+                    pqInvl = (None,None) if maxDel is None else jutil.invl_scale((-maxDel, maxDel), dist)
+                    assert(jutil.invl_valid(pqInvl))
+
+                    hlmap[(pID, qID)] = pqInvl
                     
-                    hlmap[(pID, qID)] = (maxDelN, None, maxDel)
-                    #hlmap[(qID, pID)] = (None, 0.0, None)
-
         return hlmap       
-        
     
-    def _gen_height_errors(self, hlmap):
-        '''Returns (minArray, errSqArray, errDelArray, maxArray)'''
-
-        pointCount = self.point_count()
-        minArray = [None] * pointCount
-        errSqArray = [0.0] * pointCount
-        errDelArray = [0.0] * pointCount
-        maxArray = [None] * pointCount
-
-        for edge, properties in hlmap.items():
-            pID, qID = edge
-            minDel, desDel, maxDel = properties
-            
-            pHeight = self._height[pID]
-            qHeight = self._height[qID]
-            pqDel = qHeight - pHeight
-
-            if(minDel is not None):
-                pMax = qHeight - minDel
-                if maxArray[pID] is None or pMax < maxArray[pID]:
-                    maxArray[pID] = pMax
-
-                qMin = pHeight + minDel
-                if minArray[qID] is None or minArray[qID] < qMin:
-                    minArray[qID] = qMin
-
-            if(maxDel is not None):
-                pMin = qHeight - maxDel
-                if minArray[pID] is None or minArray[pID] < pMin:
-                    minArray[pID] = pMin
-
-                qMax = pHeight + maxDel
-                if maxArray[qID] is None or qMax < maxArray[qID]:
-                    maxArray[qID] = qMax
-
-            if(desDel is not None):
-                err = pqDel - desDel
-                esq = err * err
-                errDel = 2 * err
-
-                if(not esq >= 0.0):
-                    print(f"FOOBAR! {pHeight} {qHeight} {pqDel} {desDel} {err} {esq}")
-                
-                assert(esq >= 0)
-
-                ## Account half the error to each node
-                errSqArray[pID] += esq / 2.0
-                errSqArray[qID] += esq / 2.0
-
-                ## Account for signage in correction factor
-                errDelArray[pID] -= errDel
-                errDelArray[qID] += errDel
-                
-        return (minArray, errSqArray, errDelArray, maxArray)
-    
-    @staticmethod
-    def _feedbackRpt(numInvalids, numUnskooshed, totalMapSize):
-        print(f'I({numInvalids}) S({numUnskooshed}) T({totalMapSize})')
     
     def gen_heights(self, slope_fn, sea_height, *,
                     maxHeight=8848, underwaterMul = 3,
-                    epsilon=0.001, selectRange=(0.5, 0.5),
-                    skooshWithin=1, feedbackCB=_feedbackRpt):
-
-        alpha = 0.49
-        maxStep = 2.0
-        ignoreLimits = False
+                    epsilon=0.1, selectRange=(0.49, 0.51),
+                    completedCB=None):
         
+        ## This holds the valid height intervals
+        nodeIntervals = []
         refractedMin = sea_height / underwaterMul
-        
         hlmap = self.gen_height_limit_map(slope_fn)
+        updatedIDs = []
+
+        #for arrow, invl in hlmap.items():
+        #    print(f'E [{arrow}] => {invl}')
+
         for pID, pLevel in self.enumerate_levels():
-            if pLevel is None or pLevel is False:
-                self._height[pID] = refractedMin
-
-        tErrArray = [None] * 100
-        maxIter = 1000
-        iterCnt = 0
-        isValid = False
+            ## Populate constraints as we walk forward
+            pInterval = ((refractedMin - epsilon),
+                         (refractedMin + epsilon if pLevel is None or pLevel is False else
+                          maxHeight))
+            assert(jutil.invl_valid(pInterval))
+            nodeIntervals.append(pInterval)
+            updatedIDs.append(pID)
+            #print(f'N [{pID}] => {pInterval}')
+            
         
-        while(iterCnt < maxIter):
-            iterCnt += 1
-            minArray, errSqArray, errDelArray, maxArray = self._gen_height_errors(hlmap)
+        for sID in range(self.point_count()):            
+            while(updatedIDs):
+                #print(".", end="")
+                pID = updatedIDs.pop(0)
+                pInterval = nodeIntervals[pID]
+                for qID in self.neighbors(pID):
+                    qInterval = nodeIntervals[qID]
+                    pqInterval = (jutil.invl_conj(hlmap[(pID, qID)]) if pID < qID else
+                                  hlmap[(qID, pID)])
+                    qConstraint = jutil.invl_sum(qInterval, pqInterval)
+                    pInterval = jutil.invl_parallel(pInterval, qConstraint)
 
-            invalidCnt = 0
-            totalErr = 0;
-            worstErr = 0;
-            biggestStep = 0;
-            
-            for pID, pData in enumerate(zip(minArray, errSqArray, errDelArray, maxArray)):
-                localInvalid = False
-                
-                pMin, pErrSq, pErrDel, pMax = pData
-                pLevel = self.level(pID)
-
-                if(pMin is None or pMin < refractedMin):
-                    pMin = refractedMin
-
-                if(pMax is None or pMax > maxHeight):
-                    pMax = maxHeight
-                
-                if pMin > pMax:
-                    localInvalid = True
-                    invalidCnt += 1
-
-                if pLevel is None or pLevel is False:
-                    continue
-                
-                if(not ignoreLimits):
-                    if(self._height[pID] < pMin):
-                        if(pMin - self._height[pID] < 1.0):
-                            self._height[pID] = pMin
-                        else:
-                            self._height[pID] = (self._height[pID] + pMin) / 2.0
-                        continue
-                    if(self._height[pID] > pMax):
-                        if(self._height[pID] - pMax < 1.0):
-                            self._height[pID] = pMax
-                        else:
-                            self._height[pID] = (self._height[pID] + pMax) / 2.0
-                            
-                        continue
-                        
-                if pErrSq is not None and pErrDel is not None:
-                    localErr = math.sqrt(pErrSq)
-                    if(not pErrSq >= 0.0):
-                        print(f'AAAH! {pErrSq}')
+                    if(not jutil.invl_valid(pInterval)):
+                        raise RuntimeError(f'During constraint propagation at pID {pID} the height interval {pInterval} vanished!  The grid is overconstrained.')
                     
-                    assert(not math.isnan(localErr))
-                    totalErr += localErr
-                    if(localErr > worstErr):
-                        worstErr = localErr
+                if(pInterval != nodeIntervals[pID]):
+                    #print("!", end="")
+                    nodeIntervals[pID] = pInterval
+                    updatedIDs.extend(self.neighbors(pID))
 
-                    assert(not math.isnan(pErrDel))
-                    step = -pErrDel / 2.0  ## The double-derivative for each
-                                           ## error type is a constant 2
-                    if abs(step) > abs(biggestStep):
-                        biggestStep = step
+            #print("@", end="")
+            sInterval = nodeIntervals[sID]
+            if(not jutil.invl_closed(sInterval)):
+                raise RuntimeError(f'During constraint propagation at pID {sID} the height interval {sInterval} did not close!  The grid is underconstrained.')
 
-                    assert(not math.isnan(alpha))
-                    step *= alpha
+            bW = self._jr.uniform(selectRange[0], selectRange[1])
+            aW = 1.0 - bW
+            sHeight = sInterval[0] * aW + sInterval[1] * bW
+            self._height[sID] = sHeight
+            nodeIntervals[sID] = (sHeight - epsilon, sHeight + epsilon)
+            updatedIDs.extend(self.neighbors(sID))
 
-                    if step > maxStep:
-                        step = maxStep
-                    elif step < -maxStep:
-                        step = -maxStep
-
-                    assert(not math.isnan(step))
-                        
-                    self._height[pID] += step
-                
-            print(f'C:{iterCnt} I:{invalidCnt} T:{totalErr} W:{worstErr} S:{biggestStep}')
-
-            if(biggestStep < -maxStep or maxStep < biggestStep):
-                alpha *= 0.9
-            else:
-                alpha *= 1.2
+            #for pID, pInterval in enumerate(nodeIntervals):
+            #    print(f'N [{pID}] => {pInterval}')
+            if(completedCB is not None):
+                completedCB(sID, self.point_count())
             
-            #alpha = abs(maxStep / biggestStep)
-            
-            if(ignoreLimits or invalidCnt == 0):
-                if totalErr == 0 or (tErrArray[0] is not None and tErrArray[0] <= totalErr):
-                    isValid = True
-                    break
-                
-                tErrArray.append(totalErr)
-                del tErrArray[0]
-
         for pID in range(self.point_count()):
             if self._height[pID] < 0:
                 self._height[pID] *= underwaterMul
         
         self._update_height_stats()
-        return isValid
+        return 1
     
     def anneal(self, stddev, r):
         for pID in range(self.point_count()):
-            self._height[pID] += r.uniform(-2 * stddev, 2 * stddev)
+            self._height[pID] += self._jr.uniform(-2 * stddev, 2 * stddev)
     
     def height_color(self, pID):
         height = self._height[pID]
@@ -369,12 +257,7 @@ class _ut_HeightMapper(unittest.TestCase):
                                                           hmap.level_color(qID, maxLevel=ml)))
         self.quickview(view)
 
-        for adev in (0.0, 5.0, 2.0):
-            if(adev > 0.0):
-                hmap.anneal(adev, self.jr)
-            
-            hmap.gen_heights(lambda pID: (0, 0.01, 1) if hmap.level(pID) <= 0 else (0, 0.30, 1), -40, maxHeight=984, selectRange=(0.0, 1.0))
-            # hmap.gen_heights(lambda pID: (0, None, 0.10) if hmap.level(pID) <= 0 else (0, None, 0.60), -40, maxHeight=984, selectRange=(0.0, 1.0))
+        hmap.gen_heights(lambda pID: (0, 0.10) if hmap.level(pID) <= 0 else (0, 0.60), -40, maxHeight=984, selectRange=(0.3, 0.7))
             
 
         

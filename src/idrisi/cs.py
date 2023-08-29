@@ -225,7 +225,7 @@ class CS(heightmap.HeightMapper):
 
         minLevel = self.min_level()
         
-        if squeezeLevels > 0:
+        if minLevel is not None and squeezeLevels > 0:
             wtFn = jutil.make_linear_interp(minLevel, 0)
             squeezeFn = lambda i: int(wtFn(i)[1] * squeezeLevels + 0.5)
         else:
@@ -260,57 +260,41 @@ class CS(heightmap.HeightMapper):
             if pLevel <= 0:
                 if pID in drainMap:
                     dmag = riverGradePower ** max(0, drainMap[pID] - 1)
-                    return(riverMinGrade, max(riverMinGrade, sourceSlope / dmag), None)
+                    return(riverMinGrade, 2.0 * max(riverMinGrade, sourceSlope / dmag))
                 
                 else:
-                    return(0.1*wrinkSlope, wrinkSlope, 1)
+                    return(riverMinGrade, 2.0 * wrinkSlope)
 
             for landLevel, landSlope in landSlopes:
                 if pLevel <= landLevel:
-                    return(0.1*landSlope, landSlope, 1)
+                    return(0, 2.0 * landSlope)
 
-            return(0.1 * peakSlope, peakSlope, 1.5)
-
+            return(0, 2.0 * peakSlope)
+        
         return(_slope_fn)
 
     def make_genheight_meter_with_cb(self):
         lastTotal = self.point_count()
-        meter = tqdm.tqdm(total=lastTotal, leave=True)
-        def meterCB(nI, nS, nT):
+        meter = tqdm.tqdm(total=self.point_count(), leave=True)
+        def meterCB(nS, nT):
             nonlocal lastTotal
             
             if lastTotal != nT:
                 lastTotal = nT
                 meter.reset(total=lastTotal)
             
-            meter.n = lastTotal-max(nI, nS)
+            meter.n = nS
             meter.refresh()
-
+            
         return meter, meterCB
 
     def gen_heights_really_hard(self, slopeFn):
-        relax = 1
-        while True:
-            print(f"I am relaxed:  {relax}")
-
-            meter, meterCB = self.make_genheight_meter_with_cb()
-            try:
-                for adev in (0.0, 15.0, 5.0, 2.0):
-                    self.anneal(adev, self.jr)            
-                    self.gen_heights(slopeFn, sea_height=-40, maxHeight=984,
-                                     selectRange=(0.4, 0.6),
-                                     feedbackCB=meterCB, skooshWithin=10)
-                
-                print(f"Final relaxation:  {relax}")
-                break
-            except RuntimeError as e:
-                print(e)
-                relax *= 0.90
-            #except KeyboardInterrupt as e:
-            #    print(e)
-            #    relax *= 1.21                 
-
-            meter.close()
+        meter, meterCB = self.make_genheight_meter_with_cb()
+        self.gen_heights(slopeFn, sea_height=-40, maxHeight=984,
+                         selectRange=(0.3, 0.7),
+                         completedCB=meterCB)
+        
+        meter.close()
 
     
     def punch_rivers(self, *, drainMap, widthatsource=13, meanDepth=18):

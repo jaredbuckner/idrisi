@@ -80,6 +80,30 @@ def make_array_interp(tgtArraySize, minVal, maxVal):
     return(_ainterp)
 
 
+## Interval helper methods
+def invl_conj(a):
+    return (None if a[1] is None else -a[1],
+            None if a[0] is None else -a[0])
+
+def invl_sum(a, b):
+    return(None if a[0] is None or b[0] is None else a[0] + b[0],
+           None if a[1] is None or b[1] is None else a[1] + b[1])
+
+def invl_scale(a, factor):
+    return(None if a[0] is None else a[0] * factor,
+           None if a[1] is None else a[1] * factor)
+
+def invl_parallel(a, b):
+    return(b[0] if a[0] is None else a[0] if b[0] is None else max(a[0], b[0]),
+           b[1] if a[1] is None else a[1] if b[1] is None else min(a[1], b[1]))
+
+def invl_valid(a):
+    return(a[0] is None or a[1] is None or a[0] <= a[1])
+
+def invl_closed(a):
+    return(a[0] is not None and a[1] is not None and a[0] <= a[1])
+
+
 class Viewport():
     '''Class objects maintain a relationship between the map grid dimensions and a
     view of that grid.
