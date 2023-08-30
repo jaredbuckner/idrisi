@@ -370,8 +370,14 @@ class LevelMapper(delmap.DelMapper):
                 toDelete.append(pID)
                 continue
 
+            if(qLevel != pLevel - 1):
+                ## We are not the longest source.  This means there is
+                ## definitely another source.  So we can be deleted!
+                toDelete.append(pID)
+                continue
+               
             ## Look at all the neighbors of qID.  We will keep pID if it is the
-            ## first riverine node which drains into qID.  We will remove it
+            ## first riverine node which drains into qID at our level.  We will remove it
             ## otherwise.
             for rID in self.neighbors(qID):
                 if(rID == pID):
@@ -379,8 +385,8 @@ class LevelMapper(delmap.DelMapper):
                     break
                 
                 rLevel = self.level(rID)
-                if rLevel is None or rLevel > 0:
-                    ## Not a riverine node
+                if rLevel is None or rLevel != pLevel:
+                    ## Not a riverine node at our level
                     continue
                 
                 if self.drain(rID) == qID:
