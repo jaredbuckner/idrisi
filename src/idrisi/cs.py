@@ -164,13 +164,13 @@ class CS(heightmap.HeightMapper):
                       retarget=True,
                       allowedByID=None):
 
-        riverClipLevel  = None if minRiverLength is None else max(int(minRiverLength / self.separate), 1)
         seaShoreMin     = max(int(seaShoreOffsetMin / self.separate), 1)
         seaShoreMax     = max(int(seaShoreOffsetMax / self.separate), 1)
         riverShoreMin   = max(int(riverShoreOffsetMin / self.separate), 1)
         riverShoreMax   = max(int(riverShoreOffsetMax / self.separate), 1)
         squeezeLevels   = int(riverShoreSqueeze / self.separate)
-
+        
+        riverClipLevel  = None if minRiverLength is None else max(int(minRiverLength / self.separate), 1)
         riverSepLevel = max(1, int(riverSeparation) / self.separate)
 
         ## River segment limits
@@ -178,51 +178,56 @@ class CS(heightmap.HeightMapper):
         rslx = max(1,int((riverSegmentLength + riverSegmentVar) / self.separate))
         rsla = (rsln + rslx) / 2
 
-        ## River selection choice level limits
-        rscln = (riverSepLevel + rsln) // 2
-        rsclx = (riverSepLevel + rslx) // 2
+        ## If it's 0, we can't grow rivers anyway
+        if(rsla != 0):
         
-        probableIterations = math.ceil(sum(1 for pID, pLevel in self.enumerate_levels() if pLevel is not None and pLevel is not False and rsln <= pLevel and (retarget or pLevel <= rslx)) / riverSepLevel / rsla)
-        if maxIterations is not None and maxIterations < probableIterations:
-            probableIterations = maxIterations
+            ## River selection choice level limits
+            rscln = (riverSepLevel + rsln) // 2
+            rsclx = (riverSepLevel + rslx) // 2
+
+            probableIterations = math.ceil(sum(1 for pID, pLevel in self.enumerate_levels() if pLevel is not None and pLevel is not False and rsln <= pLevel and (retarget or pLevel <= rslx)) / riverSepLevel / rsla)
+            if maxIterations is not None and maxIterations < probableIterations:
+                probableIterations = maxIterations
+
+            targets = list(pID for pID, pLevel in self.enumerate_levels()
+                           if pLevel is not None and pLevel is not False and
+                           (allowedByID is None or allowedByID[pID]) and
+                           rscln <= pLevel <= rsclx)
+
+            iteration = 0
+            meter = tqdm.tqdm(total=probableIterations, desc=meterStr, leave=True)
+            while(targets and (maxIterations is None or iteration < maxIterations)):
+                iteration += 1
+
+                if(selectWeights is None):
+                    tID = self.jr.choice(targets)
+                else:
+                    localWeights = tuple(selectWeights[pID] for pID in targets)
+                    tID = self.jr.choices(targets, localWeights)[0]
+
+                tLevel = self.level(tID)
+                skipmin = max(0, tLevel - rslx)
+                skipmax = max(0, tLevel - rsln)
+                skip=self.jr.randint(skipmin, skipmax)
+
+                self.add_river_source(tID, skip=skip)
+                self.levelize()
+
+                if retarget:
+                    targets = list(pID for pID, pLevel in self.enumerate_levels()
+                                   if pLevel is not None and pLevel is not False and
+                                   (allowedByID is None or allowedByID[pID]) and
+                                   rscln <= pLevel <= rsclx)
+                else:
+                    targets = list(pID for pID in targets if rscln <= self.level(pID) <= rsclx)
+
+                meter.update()
+
+            if(riverClipLevel is not None):
+                self.remove_river_stubs(riverClipLevel)
+
+        ## End skip
             
-        targets = list(pID for pID, pLevel in self.enumerate_levels()
-                       if pLevel is not None and pLevel is not False and
-                       (allowedByID is None or allowedByID[pID]) and
-                       rscln <= pLevel <= rsclx)
-        
-        iteration = 0
-        meter = tqdm.tqdm(total=probableIterations, desc=meterStr, leave=True)
-        while(targets and (maxIterations is None or iteration < maxIterations)):
-            iteration += 1
-            
-            if(selectWeights is None):
-                tID = self.jr.choice(targets)
-            else:
-                localWeights = tuple(selectWeights[pID] for pID in targets)
-                tID = self.jr.choices(targets, localWeights)[0]
-
-            tLevel = self.level(tID)
-            skipmin = max(0, tLevel - rslx)
-            skipmax = max(0, tLevel - rsln)
-            skip=self.jr.randint(skipmin, skipmax)
-
-            self.add_river_source(tID, skip=skip)
-            self.levelize()
-            
-            if retarget:
-                targets = list(pID for pID, pLevel in self.enumerate_levels()
-                               if pLevel is not None and pLevel is not False and
-                               (allowedByID is None or allowedByID[pID]) and
-                               rscln <= pLevel <= rsclx)
-            else:
-                targets = list(pID for pID in targets if rscln <= self.level(pID) <= rsclx)
-
-            meter.update()
-
-        if(riverClipLevel is not None):
-            self.remove_river_stubs(riverClipLevel)
-
         minLevel = self.min_level()
         
         if minLevel is not None and squeezeLevels > 0:
@@ -231,7 +236,7 @@ class CS(heightmap.HeightMapper):
         else:
             squeezeFn = lambda i: 0
 
-
+        
         self.levelize(seaShoreMin=seaShoreMin, seaShoreMax=seaShoreMax,
                       riverShoreMin=riverShoreMin, riverShoreMax=riverShoreMax, riverLiftFn=squeezeFn)
 
@@ -634,14 +639,14 @@ if __name__ == '__main__':
     selectWeights = csmap.gen_select_weights(focusPoint)
 
     
-    for minRiverLength, viewStr, allowedIDs in ((riverSeparation * 3, "major", canRiver),
+    for minRiverLength, viewStr, allowedIDs in ((riverSeparation * 4, "major", canRiver),
                                                 (riverSeparation * 2, "minor", None),
                                                 (riverSeparation * 1, "revis", None)):
         maxLevel = csmap.extend_rivers(meterStr=viewStr,
                                        riverSeparation=riverSeparation,
                                        riverSegmentLength=riverSegmentLength,
                                        minRiverLength=minRiverLength,
-                                       maxIterations=600,
+                                       maxIterations=6000,
                                        selectWeights=selectWeights,
                                        allowedByID=allowedIDs)
         view = csmap.draw_levels(maxLevel=maxLevel)
