@@ -227,16 +227,17 @@ class LevelMapper(delmap.DelMapper):
     def min_max_level(self):
         ## Returns (False,False) if no level has been set,
         ##         (None,None) if only sea levels have been set, or
-        ##         the (man, max) level value found
+        ##         the (min, max) level value found
         nl=False
         xl=False
 
         for pID, level in enumerate(self._level):
-            if(nl is False or self.is_decreasing(nl, level)):
-               nl = level
-
+            if(nl is False  or (nl is None and level is not False) or
+               (level is not False and level is not None and self.is_decreasing(nl, level))):
+                nl = level
+                
             if(xl is False or self.is_increasing(xl, level)):
-               xl = level
+                xl = level
                
         return(nl, xl)
 
@@ -267,7 +268,7 @@ class LevelMapper(delmap.DelMapper):
                               seaShoreMin=1, seaShoreMax=1,
                               riverShoreMin=1, riverShoreMax=1,
                               riverLiftFn=lambda i:0):
-        
+
         nLevel = None
         seaSpan = seaShoreMax - seaShoreMin + 1
         riverSpan = riverShoreMax - riverShoreMin + 1
@@ -330,14 +331,16 @@ class LevelMapper(delmap.DelMapper):
         invalids = set(self.levelizables(**kwargs))
         
         while(invalids):
-            pID = invalids.pop()
+            pID = invalids.pop()            
             pLevel = self._level_from_neighbors(pID, **kwargs)
-            if(pLevel is not None):
+            if(pLevel is not None and (self._level[pID] is None or self._level[pID] is False or self._level[pID] != pLevel)):
                 self._level[pID] = pLevel
                 for qID in self.neighbors(pID):
-                    if(not self.is_valid_level(qID, **kwargs)):
+                    qLevel = self.level(qID)
+                    if(qLevel is not None and
+                       (qLevel is False or qLevel > 0)):
                         invalids.add(qID)
-
+            
     
     def add_river_source(self, pID, skip=0):
         ## Set skip to the number of levels to skip over before adding river
@@ -647,8 +650,18 @@ class _ut_LevelMapper(unittest.TestCase):
         lmap.remove_river_stubs(6)
         lmap.levelize()
         
-        for shoreLevel in (1, 5, 1):
-            lmap.levelize(seaShoreMax=shoreLevel)
+        for shoreLevel, squeezeLevels in ((1, 0) , (5, 0), (1, 5)):
+            minLevel = lmap.min_level()
+        
+            if minLevel is not None and squeezeLevels > 0:
+                print(f'{minLevel}:0')
+                wtFn = jutil.make_linear_interp(minLevel, 0)
+                squeezeFn = lambda i: int(wtFn(i)[1] * squeezeLevels + 0.5)
+            else:
+                print(f'{0}!{0}')
+                squeezeFn = lambda i: 0
+            
+            lmap.levelize(seaShoreMax=shoreLevel, riverLiftFn=squeezeFn)
 
             ml = lmap.max_level()
             if ml is None or ml is False:
