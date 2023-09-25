@@ -49,13 +49,25 @@ class LevelMapper(delmap.DelMapper):
         self._forbiddenEdges = set()
 
         ## A set of neighbor nodes.  These are the adjacent nodes which are not
-        ## on forbiddenedges.  If the entry is set to None, the neighbor nodes
+        ## on forbidden edges.  If the entry is set to None, the neighbor nodes
         ## have not been calculated.
         self._neighborNodes = [None] * self.point_count()
+
+        ## A set of drain nodes.  These are the neighbor nodes whose levels are
+        ## less that the indexed level.  If the entry is set to None, the drain
+        ## nodes have not been calculated.
+        self._drainNodes = [None] * self.point_count()
         
     def level(self, pID):
         return(self._level[pID])
 
+    def set_level(self, pID, pLevel):
+        self._level[pID] = pLevel
+        self._drainNodes[pID] = None
+        
+        for qID in self.neighbors(pID):
+            self._drainNodes[qID] = None
+        
     def enumerate_levels(self):
         yield from enumerate(self._level)
 
@@ -71,7 +83,9 @@ class LevelMapper(delmap.DelMapper):
         else:
             self._forbiddenEdges.add((bPID, aPID))
         self._neighborNodes[aPID] = None
+        self._drainNodes[aPID] = None
         self._neighborNodes[bPID] = None
+        self._drainNodes[bPID] = None
 
     def forbid_long_edges(self, limit):
         ## If edge is longer than limit, forbid it!
@@ -97,16 +111,16 @@ class LevelMapper(delmap.DelMapper):
 
     def set_hull_sea(self):
         for aPID, bPID in self.convex_hull_edges():
-            self._level[aPID] = None
-            self._level[bPID] = None
+            self.set_level(aPID, None)
+            self.set_level(bPID, None)
         for sID, simplex in self.enumerate_simplices():
             pID, qID, rID = simplex
             if(self.is_edge_forbidden(pID, qID) or
                self.is_edge_forbidden(qID, rID) or
                self.is_edge_forbidden(rID, pID)):
-                self._level[pID] = None
-                self._level[qID] = None
-                self._level[rID] = None
+                self.set_level(pID, None)
+                self.set_level(qID, None)
+                self.set_level(rID, None)
         
     def set_functional_sea(self, *select_fn_list):
         ## This is named backward.  The functions in the list should return
@@ -114,7 +128,7 @@ class LevelMapper(delmap.DelMapper):
         ## marked as sea if all of the functions applied to it return false
         for pID, point in self.enumerate_points():
             if not any(inside(point) for inside in select_fn_list):
-                self._level[pID] = None
+                self.set_level(pID, None)
 
     def set_simplex_sea(self, pointSeq):
         ## Given a sequence of points (x, y), find the simplex containing each
@@ -123,7 +137,7 @@ class LevelMapper(delmap.DelMapper):
             sID = self.containing_simplex(point)
             if(sID != -1):
                 for pID in self.simplex(sID):
-                    self._level[pID] = None
+                    self.set_level(pID, None)
 
     def set_fill_sea(self, pID):
         ## Given a point, fill it and its unset neighbors (recursively) as sea
@@ -131,7 +145,7 @@ class LevelMapper(delmap.DelMapper):
         while(stuffToFill):
             pID = stuffToFill.pop()
             if self._level[pID] is False:
-                self._level[pID] = None
+                self.set_level(pID, None)
                 stuffToFill.update(self.neighbors(pID))
     
 
@@ -245,9 +259,12 @@ class LevelMapper(delmap.DelMapper):
         yield from ((qID, self.level(qID)) for qID in self.neighbors(pID))
 
     def drain_levels(self, pID):
-        pLevel = self.level(pID)
-        yield from ((qID, qLevel) for qID, qLevel in self.neighbor_levels(pID)
-                    if self.is_decreasing(pLevel, qLevel))
+        if self._drainNodes[pID] is None:
+            pLevel = self.level(pID)
+            self._drainNodes[pID] = tuple((qID, qLevel) for qID, qLevel in self.neighbor_levels(pID)
+                                          if self.is_decreasing(pLevel, qLevel))
+        
+        yield from self._drainNodes[pID]
         
     ## The canonial drain for this point, or None if no lower point exists
     def drain(self, pID):
@@ -257,7 +274,7 @@ class LevelMapper(delmap.DelMapper):
 
         for qID, qLevel in self.drain_levels(pID):
             if(self.is_decreasing(pLevel, qLevel) and
-               (dID is None or self.is_decreasing(qLevel, dLevel))):
+               (dID is None or self.is_decreasing(dLevel, qLevel))):
                 dID = qID
                 dLevel = qLevel
                 
@@ -334,7 +351,7 @@ class LevelMapper(delmap.DelMapper):
             pID = invalids.pop()            
             pLevel = self._level_from_neighbors(pID, **kwargs)
             if(pLevel is not None and (self._level[pID] is None or self._level[pID] is False or self._level[pID] != pLevel)):
-                self._level[pID] = pLevel
+                self.set_level(pID, pLevel)
                 for qID in self.neighbors(pID):
                     qLevel = self.level(qID)
                     if(qLevel is not None and
@@ -356,7 +373,7 @@ class LevelMapper(delmap.DelMapper):
             pLevel = self.level(pID)
 
         for negLevel, pID in enumerate(river):
-            self._level[pID] = -negLevel
+            self.set_level(pID, -negLevel)
 
     def remove_river_stubs(self, minLength):
         ## Look for forks, mark for deletion
@@ -404,7 +421,7 @@ class LevelMapper(delmap.DelMapper):
                 if(self.drain(qID) == pID):
                     toDelete.append(qID)
 
-            self._level[pID] = False
+            self.set_level(pID, False)
 
         
     def level_color(self, pID, *, maxLevel=1):

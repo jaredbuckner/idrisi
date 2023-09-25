@@ -209,7 +209,7 @@ class CS(heightmap.HeightMapper):
                 skipmin = max(0, tLevel - rslx)
                 skipmax = max(0, tLevel - rsln)
                 skip=self.jr.randint(skipmin, skipmax)
-
+                
                 self.add_river_source(tID, skip=skip)
                 self.levelize()
 
@@ -245,7 +245,8 @@ class CS(heightmap.HeightMapper):
 
     def make_slope_fn(self, distGradeSeq, *,
                       drainMap, riverGradePower=2,
-                      shoreGrade, wrinkGrade, riverMinGrade, sourceGrade, peakGrade):
+                      shoreGrade, wrinkGrade, riverMinGrade, sourceGrade, peakGrade,
+                      xFreq=None, yFreq=None, xOffset=0, yOffset=0, xScale=1, yScale=1):
         landSlopes = list()
         for distance, grade in distGradeSeq:
             level = int(distance / self.separate + 0.5)
@@ -259,22 +260,30 @@ class CS(heightmap.HeightMapper):
 
         def _slope_fn(pID):
             pLevel = self.level(pID)
+            pScale = 1
+            pX, pY = self.point(pID)
+            
+            if(xFreq is not None):
+                pScale *= xScale ** math.sin(math.tau * (pX + xOffset) / xFreq)
 
+            if(yFreq is not None):
+                pScale *= yScale ** math.sin(math.tau * (pY + yOffset) / yFreq)
+            
             assert(pLevel is not None and pLevel is not False)
 
             if pLevel <= 0:
                 if pID in drainMap:
                     dmag = riverGradePower ** max(0, drainMap[pID] - 1)
-                    return(riverMinGrade, 2.0 * max(riverMinGrade, sourceSlope / dmag))
+                    return(pScale * riverMinGrade, pScale * 2.0 * max(riverMinGrade, sourceSlope / dmag))
                 
                 else:
-                    return(riverMinGrade, 2.0 * wrinkSlope)
+                    return(pScale * riverMinGrade, pScale * 2.0 * wrinkSlope)
 
             for landLevel, landSlope in landSlopes:
                 if pLevel <= landLevel:
-                    return(0, 2.0 * landSlope)
+                    return(0, pScale * 2.0 * landSlope)
 
-            return(0, 2.0 * peakSlope)
+            return(0, pScale * 2.0 * peakSlope)
         
         return(_slope_fn)
 
@@ -716,7 +725,17 @@ if __name__ == '__main__':
                                   riverMinGrade=riverMinGrade,
                                   wrinkGrade=wrinkleGrade,
                                   shoreGrade=shoreGrade,
-                                  peakGrade=peakGrade);
+                                  peakGrade=peakGrade,
+
+                                  xFreq=csmap.jr.uniform(0.5 * riverSeparation, 2.0 * riverSeparation),
+                                  xOffset=csmap.jr.uniform(0.0, 2.0*riverSeparation),
+                                  xScale=1.4141,
+
+                                  yFreq=csmap.jr.uniform(0.5 * riverSeparation, 2.0 * riverSeparation),
+                                  yOffset=csmap.jr.uniform(0.0, 2.0*riverSeparation),
+                                  yScale=1.4141
+                                  
+                                  );
 
     csmap.gen_heights_really_hard(slopeFn, underwaterMul=max(3.0, shoreGrade/floodPlainGrade))
     csmap.punch_rivers(drainMap=drains, meanDepth=meanDepth)
