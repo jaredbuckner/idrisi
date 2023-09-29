@@ -26,6 +26,19 @@ class LevelMapper(delmap.DelMapper):
                         (0x66, 0x00, 0x00),
                         (0xFF, 0x8F, 0x91),
                         (0xFF, 0xFF, 0xFA) )
+
+    @staticmethod
+    def _probmod(pID, span):
+        if(span == 1):
+            return 0
+        
+        for bitshift in range(span-1, 0, -1):
+            mask = 1 << bitshift
+            if(pID & mask):
+                return bitshift
+
+        return 0
+        
     
     def __init__(self, pointSeq):
         super().__init__(pointSeq)
@@ -294,11 +307,11 @@ class LevelMapper(delmap.DelMapper):
             if qLevel is False:
                 continue
             if(qLevel is None):
-                seaLevel = pID % seaSpan + seaShoreMin - 1  ## Subtract one to add it later
+                seaLevel = LevelMapper._probmod(pID, seaSpan) + seaShoreMin - 1  ## Subtract one to add it later
                 if nLevel is None or nLevel > seaLevel:
                     nLevel = seaLevel
             elif(qLevel <= 0):
-                riverLevel = riverLiftFn(qLevel) + pID % riverSpan + riverShoreMin - 1  ## Subtract 1 to add it later
+                riverLevel = riverLiftFn(qLevel) + LevelMapper._probmod(pID, riverSpan) + riverShoreMin - 1  ## Subtract 1 to add it later
                 if nLevel is None or nLevel > riverLevel:
                     nLevel = riverLevel
             else:

@@ -704,9 +704,9 @@ if __name__ == '__main__':
                                    riverSegmentLength=wrinkleMeanLength,
                                    riverSegmentVar=wrinkleDevLength,
                                    seaShoreOffsetMin=floodPlainWidth / 2,
-                                   seaShoreOffsetMax=floodPlainWidth / 2 + shoreWidth,
+                                   seaShoreOffsetMax=floodPlainWidth + shoreWidth,
                                    riverShoreOffsetMin=0,
-                                   riverShoreOffsetMax=shoulderWidth,
+                                   riverShoreOffsetMax=floodPlainWidth,
                                    riverShoreSqueeze=floodPlainWidth + footHillWidth + midHillWidth,
                                    maxIterations=600,
                                    retarget=False)
