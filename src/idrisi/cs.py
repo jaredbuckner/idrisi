@@ -133,7 +133,82 @@ class CS(heightmap.HeightMapper):
                 for x in (rectMin[0], rectMax[0]):
                     if 0 <= x < view.width:
                         view.putpixel((x, y), (192, 192, 192))
-                
+
+    
+    def gen_koch_shore(self):
+        ## For now we will generate a single path going clockwise around the landmass.
+        ## There are four possible in paths:
+        pathIn = list()
+        pathIn.append( (((self.jr.uniform(9000, self.fillRect[2]), self.fillRect[1]), None),
+                        ((self.jr.uniform(9000, 14000), 4000), None),
+                        ((14000, 4000), None),
+                        ((14000, 14000), None)))
+        pathIn.append( (((self.fillRect[2], self.jr.uniform(self.fillRect[1], 9000)), None),
+                        ((14000, self.jr.uniform(4000, 9000)), None),
+                        ((14000, 14000), None)))
+        pathIn.append( (((self.fillRect[2], self.jr.uniform(9000, self.fillRect[3])), None),
+                        ((14000, self.jr.uniform(9000, 14000)), None),
+                        ((14000, 14000), None)))
+        pathIn.append( (((self.jr.uniform(14000, self.fillRect[2]), self.fillRect[3]), None),
+                        ((self.jr.uniform(9000, 14000), 14000), False)))
+        
+        ## And there are four possible out paths
+        pathOut = list()
+        pathOut.append( (((self.jr.uniform(4000, 9000), 14000), False),
+                         ((self.jr.uniform(self.fillRect[0], 4000), self.fillRect[3]), False)))
+        pathOut.append( (((4000, 14000), False),
+                         ((4000, self.jr.uniform(9000, 14000)), None),
+                         ((self.fillRect[0], self.jr.uniform(9000, self.fillRect[3])), None)))
+        pathOut.append( (((4000, 14000), False),
+                         ((4000, self.jr.uniform(4000, 9000)), None),
+                         ((self.fillRect[0], self.jr.uniform(self.fillRect[1], 9000)), None)))
+        pathOut.append( (((4000, 14000), False),
+                         ((4000, 4000), None),
+                         ((self.jr.uniform(4000, 9000), 4000), None),
+                         ((self.jr.uniform(self.fillRect[0], 9000), self.fillRect[1]), None)))
+                   
+        path = self.jr.choice(pathIn) + self.jr.choice(pathOut)
+        #print(path)
+        
+        kp = list()
+        for aleph, beth in zip(path, path[1:]):
+            p0, dummy = aleph
+            p1, leanLeft = beth
+            kp.extend(self.jr.koch2_path(p0, p1, self.separate * self.separate / 100.0,
+                                         #fixedR=1/4,
+                                         canSkew=True,
+                                         leanLeft = leanLeft))
+            
+        kp.append(path[-1][0])
+        
+        self.set_simplex_sea(kp)
+        for pID, point in self.enumerate_points():
+            if(8000 <= point[0] <= 10000 and
+               16000 <= point[1]):
+                self.set_fill_sea(pID)
+
+        return kp
+    
+    def gen_koch_sink(self, center, radius, sides=6):
+        kp = list()
+        offbit = self.jr.uniform(0, sides)
+        for side in range(1, sides + 1):
+            th_0 = math.tau * (side - 1 + offbit) / sides
+            th_1 = math.tau * (side     + offbit) / sides
+            p0 = (center[0] + math.cos(th_0) * radius,
+                  center[1] + math.sin(th_0) * radius)
+            p1 = (center[0] + math.cos(th_1) * radius,
+                  center[1] + math.sin(th_1) * radius)
+            kp.extend(self.jr.koch2_path(p0, p1, self.separate * self.separate / 100.0,
+                                         canSkew = True))
+
+        self.set_simplex_sea(kp)
+        sID = self.containing_simplex(center)
+        for pID in self.simplex(sID):
+            self.set_fill_sea(pID)    
+
+        return(kp)
+
     ## This creates a set of weights which "drag" rivers toward the centerPoint
     def gen_select_weights(self, centerPoint):
         sw = list()
@@ -570,58 +645,10 @@ if __name__ == '__main__':
     ## Next, create shorelines.  There are a lot of ways to do this.  We will
     ## create base boundaries by creating polygons, generating koch curves, and
     ## using those as fill boundaries.
-
-    ## For now we will generate a single path going clockwise around the landmass.
-    ## There are four possible in paths:
-    pathIn = list()
-    pathIn.append( (((csmap.jr.uniform(9000, csmap.fillRect[2]), csmap.fillRect[1]), None),
-                    ((csmap.jr.uniform(9000, 14000), 4000), None),
-                    ((14000, 4000), None),
-                    ((14000, 14000), None)))
-    pathIn.append( (((csmap.fillRect[2], csmap.jr.uniform(csmap.fillRect[1], 9000)), None),
-                    ((14000, csmap.jr.uniform(4000, 9000)), None),
-                    ((14000, 14000), None)))
-    pathIn.append( (((csmap.fillRect[2], csmap.jr.uniform(9000, csmap.fillRect[3])), None),
-                    ((14000, csmap.jr.uniform(9000, 14000)), None),
-                    ((14000, 14000), None)))
-    pathIn.append( (((csmap.jr.uniform(14000, csmap.fillRect[2]), csmap.fillRect[3]), None),
-                    ((csmap.jr.uniform(9000, 14000), 14000), False)))
-
-    ## And there are four possible out paths
-    pathOut = list()
-    pathOut.append( (((csmap.jr.uniform(4000, 9000), 14000), False),
-                     ((csmap.jr.uniform(csmap.fillRect[0], 4000), csmap.fillRect[3]), False)))
-    pathOut.append( (((4000, 14000), False),
-                     ((4000, csmap.jr.uniform(9000, 14000)), None),
-                     ((csmap.fillRect[0], csmap.jr.uniform(9000, csmap.fillRect[3])), None)))
-    pathOut.append( (((4000, 14000), False),
-                     ((4000, csmap.jr.uniform(4000, 9000)), None),
-                     ((csmap.fillRect[0], csmap.jr.uniform(csmap.fillRect[1], 9000)), None)))
-    pathOut.append( (((4000, 14000), False),
-                     ((4000, 4000), None),
-                     ((csmap.jr.uniform(4000, 9000), 4000), None),
-                     ((csmap.jr.uniform(csmap.fillRect[0], 9000), csmap.fillRect[1]), None)))
-                   
-    path = csmap.jr.choice(pathIn) + csmap.jr.choice(pathOut)
-    #print(path)
     
-    kp = list()
-    for aleph, beth in zip(path, path[1:]):
-        p0, dummy = aleph
-        p1, leanLeft = beth
-        kp.extend(csmap.jr.koch2_path(p0, p1, csmap.separate * csmap.separate / 100.0,
-                                      #fixedR=1/4,
-                                      canSkew=True,
-                                      leanLeft = leanLeft))
+    kp = csmap.gen_koch_shore()
+    # kp = csmap.gen_koch_sink((9000,9000), 750)
     
-    kp.append(path[-1][0])
-
-    csmap.set_simplex_sea(kp)
-    for pID, point in csmap.enumerate_points():
-        if(8000 <= point[0] <= 10000 and
-           16000 <= point[1]):
-            csmap.set_fill_sea(pID)
-
     csmap.vp.reset_grid_sel()
 
     view = csmap.draw_levels(maxLevel=2)
@@ -673,28 +700,6 @@ if __name__ == '__main__':
     ## Our drainage information will be based on the unwrinkled river paths
     drains = csmap.gen_drain_levels()
 
-    ## There are some problems with river generations that I haven't worked
-    ## out.  Let's repair the drain information for now.
-    for pID, pLevel in csmap.enumerate_levels():
-        if pLevel is not None and pLevel is not False and pLevel == 0:
-            for qID in csmap.neighbors(pID):
-                qLevel = csmap.level(qID)
-                if(qLevel is None or qLevel is not False and qLevel < 0):
-                    break
-            else:
-                print(f"Warning!  Orphaned source!")
-        
-        if pID in drains:
-            if pLevel is None or pLevel is False or pLevel > 0:
-                print(f"Warning!  Drain point has a non-river level of {pLevel!r}")
-        else:
-            if pLevel is not None and pLevel is not False and pLevel <= 0:
-                ## We know!  We know!  I wish I knew why this was happening!
-                ## Stop yelling, just fix it!
-                
-                # print(f"Warning!  River point with level {pLevel!r} is not in the drain list")
-                drains[pID] = 1
-
     if(drains):
         print(f"Max draining:  {max(drains.values())}")
     
@@ -708,7 +713,7 @@ if __name__ == '__main__':
                                    riverShoreOffsetMin=0,
                                    riverShoreOffsetMax=floodPlainWidth,
                                    riverShoreSqueeze=floodPlainWidth + footHillWidth + midHillWidth,
-                                   maxIterations=600,
+                                   maxIterations=6000,
                                    retarget=False)
 
     view = csmap.draw_levels(maxLevel=maxLevel)

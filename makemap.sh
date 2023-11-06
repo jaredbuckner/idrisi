@@ -17,10 +17,11 @@ python -midrisi.cs \
        --shoulder_grade 0.5:30 \
        --shoulder_width 50:350 \
        --shore_width 0:1000 \
-       --shore_grade 0.5:60 \
+       --shore_grade 1 \
        --peak_grade 45:60 \
-       --wrinkle_mean_length 0 \
-       --wrinkle_dev_length 0
+       --wrinkle_mean_length 300 \
+       --wrinkle_dev_length 100 \
+       --wrinkle_grade 10:15
 
 # --separate 43
        
