@@ -21,7 +21,8 @@ python -midrisi.cs \
        --peak_grade 45:60 \
        --wrinkle_mean_length 300 \
        --wrinkle_dev_length 100 \
-       --wrinkle_grade 10:15
+       --wrinkle_grade 10:15 \
+       --variance_scale 2
 
 # --separate 43
        

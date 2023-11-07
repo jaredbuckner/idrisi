@@ -333,26 +333,33 @@ class CS(heightmap.HeightMapper):
         sourceSlope = sourceGrade / math.sqrt(1 - sourceGrade*sourceGrade)
         peakSlope = peakGrade / math.sqrt(1 - peakGrade*peakGrade)
 
+        zTrans = complex(xOffset, yOffset)
+        zSkew  = complex(1/xFreq if xFreq is not None else 1,
+                         1/yFreq if yFreq is not None else 1)
+        angle  = self.jr.uniform(0, math.tau)
+        zRot   = complex(math.cos(angle), math.sin(angle))
+                
         def _slope_fn(pID):
             pLevel = self.level(pID)
             pScale = 1
             pX, pY = self.point(pID)
+            pZ = complex(pX, pY)
+            pZT = pZ + zTrans;
+            pZTS = (zSkew * pZT + zSkew.conjugate() * pZT.conjugate()) / 2
+            pZTSR = pZTS * zRot;
             
-            if(xFreq is not None):
-                pScale *= xScale ** math.sin(math.tau * (pX + xOffset) / xFreq)
-
-            if(yFreq is not None):
-                pScale *= yScale ** math.sin(math.tau * (pY + yOffset) / yFreq)
+            pScale *= xScale ** math.sin(math.tau * pZTSR.real)
+            pScale *= yScale ** math.cos(math.tau * pZTSR.imag)
             
             assert(pLevel is not None and pLevel is not False)
 
             if pLevel <= 0:
                 if pID in drainMap:
                     dmag = riverGradePower ** max(0, drainMap[pID] - 1)
-                    return(pScale * riverMinGrade, pScale * 2.0 * max(riverMinGrade, sourceSlope / dmag))
+                    return(riverMinGrade, 2.0 * max(riverMinGrade, sourceSlope / dmag))
                 
                 else:
-                    return(pScale * riverMinGrade, pScale * 2.0 * wrinkSlope)
+                    return(riverMinGrade, 2.0 * wrinkSlope)
 
             for landLevel, landSlope in landSlopes:
                 if pLevel <= landLevel:
@@ -547,6 +554,8 @@ if __name__ == '__main__':
                         help="target grade of shoulder")
     parser.add_argument('--peak_grade', type=choose.pickfloat, metavar='PCT', default=None,
                         help="target grade of highest peaks")
+    parser.add_argument('--variance_scale', type=choose.pickfloat, metavar='FACTOR', default='1:3',
+                        help="A variance used to scale sections of the map")
     parser.add_argument('--show_stats', action='store_true')
     
     
@@ -633,9 +642,15 @@ if __name__ == '__main__':
     peakGrade       = (args.peak_grade / 100 if args.peak_grade is not None else
                        csmap.jr.uniform(0.45, 0.80))
     
+    vScale = float(args.variance_scale)
+    if(vScale < 1):
+        vScale = 1 / vScale;
+    
     print( "        SeaShore FloodPln FootHill MidHill  Shoulder    Peak")
     print(f" Width:          {floodPlainWidth:8.2f} {footHillWidth:8.2f} {midHillWidth:8.2f} {shoulderWidth:8.2f}")
     print(f" Grade: {100*shoreGrade:7.1f}% {100*floodPlainGrade:7.1f}% {100*footHillGrade:7.1f}% {100*midHillGrade:7.1f}% {100*shoulderGrade:7.1f}% {100*peakGrade:7.1f}%")
+    print(f" VScale={vScale:7.2f}")
+    
 
     ## If this is not None, a river is generated from the nearest land point.
     ## All other rivers attempt to flow to this river.
@@ -720,7 +735,6 @@ if __name__ == '__main__':
     csmap.overlay_parcels(view)
     csmap.quickview(view, fname="out/cs.wrink.png", keep=True)
 
-
     slopeFn = csmap.make_slope_fn(((floodPlainWidth, floodPlainGrade),
                                    (floodPlainWidth + footHillWidth, footHillGrade),
                                    (floodPlainWidth + footHillWidth + midHillWidth, midHillGrade),
@@ -734,11 +748,11 @@ if __name__ == '__main__':
 
                                   xFreq=csmap.jr.uniform(0.5 * riverSeparation, 2.0 * riverSeparation),
                                   xOffset=csmap.jr.uniform(0.0, 2.0*riverSeparation),
-                                  xScale=1.4141,
+                                  xScale=vScale,
 
                                   yFreq=csmap.jr.uniform(0.5 * riverSeparation, 2.0 * riverSeparation),
                                   yOffset=csmap.jr.uniform(0.0, 2.0*riverSeparation),
-                                  yScale=1.4141
+                                  yScale=1
                                   
                                   );
 
