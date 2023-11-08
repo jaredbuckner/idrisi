@@ -88,7 +88,9 @@ class DelMapper:
 
     def draw_simplices(self, view, *,
                        view2grid_fn,
-                       simplex_color_fn):
+                       simplex_color_fn,
+                       antialias=1,
+                       combine_fn=min):
         ## Cache the last simplex interpreter, since nearby points are likely
         ## to be in the same simplex
         sinterp = None
@@ -100,38 +102,51 @@ class DelMapper:
             for y in range(view.height):
                 vXY = (x, y)
                 vPoint = view2grid_fn(vXY)
+
+                vColorSet = []
+                for xBit in range(antialias):
+                    for yBit in range(antialias):
+                        bitXY = (x + xBit / antialias,
+                                 y + yBit / antialias)
+                        vPoint = view2grid_fn(bitXY)
+                        
+                        aW, bW, cW = sinterp(vPoint) if sinterp is not None else (None, None, None)
+                        
+                        ## But if there was no interperter, or if one of the weights is
+                        ## out of range...
+                        if (sinterp is None or not (0 <= aW <= 1 and
+                                                    0 <= bW <= 1 and
+                                                    0 <= cW <= 1)):
+                            ## Recalculate!
+                            sinterp = None
+                            sID = self.containing_simplex(vPoint)
+                            if(sID == -1):
+                                continue
+                            
+                            aID, bID, cID = self.simplex(sID)
+                            aPoint = self.point(aID)
+                            bPoint = self.point(bID)
+                            cPoint = self.point(cID)
+                            
+                            aColor, bColor, cColor = simplex_color_fn(aID, bID, cID)
+                            
+                            if(aColor is None or bColor is None or cColor is None):
+                                continue
+                            
+                            sinterp = jutil.make_simplex_interp(aPoint, bPoint, cPoint)
+                            
+                            aW, bW, cW = sinterp(vPoint)
+
+                        vColor = tuple(int(aW * a + bW * b + cW * c) for a,b,c in zip(aColor, bColor, cColor))
+                        if len(vColor) == 1:
+                            vColor = vColor[0]
+
+                        vColorSet.append(vColor)
+
+                if(vColorSet):
+                    vColor = min(vColorSet)                
+                    view.putpixel(vXY, vColor)
                 
-                aW, bW, cW = sinterp(vPoint) if sinterp is not None else (None, None, None)
-
-                ## But if there was no interperter, or if one of the weights is
-                ## out of range...
-                if (sinterp is None or not (0 <= aW <= 1 and
-                                            0 <= bW <= 1 and
-                                            0 <= cW <=1)):
-                    ## Recalculate!
-                    sinterp = None
-                    sID = self.containing_simplex(vPoint)
-                    if(sID == -1):
-                        continue
-                    
-                    aID, bID, cID = self.simplex(sID)
-                    aPoint = self.point(aID)
-                    bPoint = self.point(bID)
-                    cPoint = self.point(cID)
-                    
-                    aColor, bColor, cColor = simplex_color_fn(aID, bID, cID)
-
-                    if(aColor is None or bColor is None or cColor is None):
-                        continue
-
-                    sinterp = jutil.make_simplex_interp(aPoint, bPoint, cPoint)
-                    
-                    aW, bW, cW = sinterp(vPoint)
-
-                vColor = tuple(int(aW * a + bW * b + cW * c) for a,b,c in zip(aColor, bColor, cColor))
-                if len(vColor) == 1:
-                    vColor = vColor[0]
-                view.putpixel(vXY, vColor)
                 
 
 class _ut_DelMapper(unittest.TestCase):
@@ -193,7 +208,8 @@ class _ut_DelMapper(unittest.TestCase):
                             view2grid_fn=self.vp.view2grid,
                             simplex_color_fn=lambda pID, qID, rID: (colors[pID%3],
                                                                     colors[qID%3],
-                                                                    colors[rID%3]))
+                                                                    colors[rID%3]),
+                            antialias=4)
         dmap.draw_edges(view,
                         grid2view_fn=self.vp.view2grid,
                         edge_color_fn=lambda pID, qID: (eColors[pID%3], eColors[qID%3]))

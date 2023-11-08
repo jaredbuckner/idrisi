@@ -432,7 +432,8 @@ class CS(heightmap.HeightMapper):
         self.draw_simplices(view, view2grid_fn=self.vp.view2grid,
                             simplex_color_fn = lambda aID, bID, cID: ( hmc(aID),
                                                                        hmc(bID),
-                                                                       hmc(cID)))
+                                                                       hmc(cID)),
+                            antialias=4)
         return view
 
 
