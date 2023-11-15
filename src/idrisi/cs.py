@@ -135,7 +135,7 @@ class CS(heightmap.HeightMapper):
                         view.putpixel((x, y), (192, 192, 192))
 
     
-    def gen_koch_shore(self):
+    def gen_koch_shore(self, overlay=1):
         ## For now we will generate a single path going clockwise around the landmass.
         ## There are four possible in paths:
         pathIn = list()
@@ -167,18 +167,29 @@ class CS(heightmap.HeightMapper):
                          ((self.jr.uniform(4000, 9000), 4000), None),
                          ((self.jr.uniform(self.fillRect[0], 9000), self.fillRect[1]), None)))
                    
-        path = self.jr.choice(pathIn) + self.jr.choice(pathOut)
+        basePath = self.jr.choice(pathIn) + self.jr.choice(pathOut)
+        revPath = list(reversed(basePath))
+
+        # Reverse the leanings
+        for index, element in enumerate(revPath):
+            if element[1] is False:
+                revPath[index] = (element[0], True)        
+        
         #print(path)
         
         kp = list()
-        for aleph, beth in zip(path, path[1:]):
-            p0, dummy = aleph
-            p1, leanLeft = beth
-            kp.extend(self.jr.koch2_path(p0, p1, self.separate * self.separate / 100.0,
-                                         #fixedR=1/4,
-                                         canSkew=True,
-                                         leanLeft = leanLeft))
+
+        path = None
+        for lay in range(0, overlay):
+            path = (basePath if lay%2 == 0 else revPath)
             
+            for aleph, beth in zip(path, path[1:]):
+                p0, dummy = aleph
+                p1, leanLeft = beth
+                kp.extend(self.jr.koch2_path(p0, p1, self.separate * self.separate / 100.0,
+                                             #fixedR=1/4,
+                                             canSkew=True,
+                                             leanLeft = leanLeft))
         kp.append(path[-1][0])
         
         self.set_simplex_sea(kp)
@@ -208,6 +219,50 @@ class CS(heightmap.HeightMapper):
             self.set_fill_sea(pID)    
 
         return(kp)
+
+    def gen_koch_island(self, overlay=1):
+        basePath = [ (self.fillRect[0], 0),
+                     (0, 0),
+                     (4000, 4000),
+                     (6000, 2000),
+                     (8000, 4000),
+                     (10000, 2000),
+                     (12000, 4000),
+                     (10000, 6000),
+                     (8000, 4000),
+                     (4000, 8000),
+                     (10000, 14000),
+                     (14000, 10000),
+                     (12000, 8000),
+                     (14000, 6000),
+                     (12000, 4000),
+                     (16000, 0),
+                     (self.fillRect[2], 0) ]
+        
+        revPath = list(reversed(basePath))
+
+        path = list(basePath)
+        for lay in range(1, overlay):
+            if(lay%2==0):
+                path.extend(basePath[1:0])
+            else:
+                path.extend(revPath[1:0])
+        
+        kp = list()
+        for p0, p1 in zip(path, path[1:]):
+            kp.extend(self.jr.koch2_path(p0, p1, self.separate * self.separate / 100.0,
+                                         #fixedR=1/4,
+                                         canSkew=True))
+            
+        kp.append(path[-1])
+        
+        self.set_simplex_sea(kp)
+        for pID, point in self.enumerate_points():
+            if(8000 <= point[0] <= 10000 and
+               16000 <= point[1]):
+                self.set_fill_sea(pID)
+
+        return kp
 
     ## This creates a set of weights which "drag" rivers toward the centerPoint
     def gen_select_weights(self, centerPoint):
@@ -662,8 +717,9 @@ if __name__ == '__main__':
     ## create base boundaries by creating polygons, generating koch curves, and
     ## using those as fill boundaries.
     
-    kp = csmap.gen_koch_shore()
+    kp = csmap.gen_koch_shore(overlay=2)
     # kp = csmap.gen_koch_sink((9000,9000), 750)
+    # kp = csmap.gen_koch_island()
     
     csmap.vp.reset_grid_sel()
 
