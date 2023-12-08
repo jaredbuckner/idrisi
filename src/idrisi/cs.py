@@ -135,7 +135,7 @@ class CS(heightmap.HeightMapper):
                         view.putpixel((x, y), (192, 192, 192))
 
     
-    def gen_koch_shore(self, overlay=1):
+    def gen_koch_shore(self, overlay=1, passage=0):
         ## For now we will generate a single path going clockwise around the landmass.
         ## There are four possible in paths:
         pathIn = list()
@@ -193,10 +193,12 @@ class CS(heightmap.HeightMapper):
         kp.append(path[-1][0])
         
         self.set_simplex_sea(kp)
-        for pID, point in self.enumerate_points():
-            if(8000 <= point[0] <= 10000 and
-               16000 <= point[1]):
-                self.set_fill_sea(pID)
+
+        if(passage != 1):
+            for pID, point in self.enumerate_points():
+                if(8000 <= point[0] <= 10000 and
+                   16000 <= point[1]):
+                    self.set_fill_sea(pID)
 
         return kp
     
@@ -220,7 +222,7 @@ class CS(heightmap.HeightMapper):
 
         return(kp)
 
-    def gen_koch_island(self, overlay=1):
+    def gen_koch_island(self, overlay=1, passage=0):
         basePath = [ (self.fillRect[0], 0),
                      (0, 0),
                      (4000, 4000),
@@ -257,10 +259,12 @@ class CS(heightmap.HeightMapper):
         kp.append(path[-1])
         
         self.set_simplex_sea(kp)
-        for pID, point in self.enumerate_points():
-            if(8000 <= point[0] <= 10000 and
-               16000 <= point[1]):
-                self.set_fill_sea(pID)
+
+        if(passage != 1):
+            for pID, point in self.enumerate_points():
+                if(8000 <= point[0] <= 10000 and
+                   16000 <= point[1]):
+                    self.set_fill_sea(pID)
 
         return kp
 
@@ -460,9 +464,12 @@ class CS(heightmap.HeightMapper):
             if rID not in community:
                 community = community + (rID,)
 
-            dfactor = 1.0 / wfactor
-            if(len(community) < expectedCommunitySize):
-                dfactor *= expectedCommunitySize / len(community)
+            ## Depth changes cause sloshing.  Let's not do that.
+            dfactor = 1.0
+
+            #dfactor = 1.0 / wfactor
+            #if(len(community) < expectedCommunitySize):
+            #    dfactor *= expectedCommunitySize / len(community)
             
             for bID in community:
                 if bID not in riverbeds or riverbeds[bID] < dfactor:
@@ -717,8 +724,8 @@ if __name__ == '__main__':
     ## create base boundaries by creating polygons, generating koch curves, and
     ## using those as fill boundaries.
     
-    kp = csmap.gen_koch_shore(overlay=2)
-    # kp = csmap.gen_koch_sink((9000,9000), 750)
+    # kp = csmap.gen_koch_shore(overlay=2, passage=1)
+    kp = csmap.gen_koch_sink((9000,18000), 750)
     # kp = csmap.gen_koch_island()
     
     csmap.vp.reset_grid_sel()
