@@ -268,14 +268,20 @@ class CS(heightmap.HeightMapper):
 
         return kp
 
-    ## This creates a set of weights which "drag" rivers toward the centerPoint
-    def gen_select_weights(self, centerPoint):
+    ## This creates a set of weights which "drag" rivers toward any of the given targets
+    def gen_select_weights(self, targetSeq):
         sw = list()
         for pID, point in self.enumerate_points():
-            delPoint = (point[0] - centerPoint[0],
-                        point[1] - centerPoint[1])
-            sw.append(delPoint[0] * delPoint[0] + delPoint[1] * delPoint[1])
-
+            minWeight = None
+            for target in targetSeq:
+                delPoint = (point[0] - target[0],
+                            point[1] - target[1])
+                weight = delPoint[0] * delPoint[0] + delPoint[1] * delPoint[1]
+                if(minWeight is None or minWeight > weight):
+                    minWeight = weight
+            
+            sw.append(weight)
+        
         swmax = max(sw)
         for pID, weight in enumerate(sw):
             sw[pID] = swmax - weight + 1
@@ -453,35 +459,36 @@ class CS(heightmap.HeightMapper):
         meter.close()
 
     
-    def punch_rivers(self, *, drainMap, widthatsource=13, meanDepth=18):
-        widthatsource = 13
+    def punch_rivers(self, *, drainMap, width, depth, snap=None, minDrain=1):
         riverbeds = dict()
         for rID, rSize in drainMap.items():
-            wfactor = self.jr.uniform(0.8, 1.2)
-            communityDist = widthatsource * max(1, (2 * rSize - 1)) * wfactor
-            expectedCommunitySize = 2 * math.pi * communityDist * communityDist / self.separate / self.separate
-            community = tuple(self.community(rID, widthatsource * max(1, (2 * rSize - 1)) * wfactor))
+            if(rSize < minDrain):
+                continue
+            
+            wfactor = 1.7 ** self.jr.uniform(-1, 1)
+            
+            # Width is a diameter, but circles are constructed from radii
+            communityDist = width * (rSize+1-minDrain) / 2 * wfactor
+            community = tuple(self.community(rID, communityDist))
             if rID not in community:
                 community = community + (rID,)
 
-            ## Depth changes cause sloshing.  Let's not do that.
-            dfactor = 1.0
+            rHeight = self.height(rID)
+            tgtHeight = rHeight - depth
+            snapHeight = tgtHeight
+            if(snap is not None):
+                tics = math.floor(tgtHeight / snap)
+                snapHeight = snap * tics
 
-            #dfactor = 1.0 / wfactor
-            #if(len(community) < expectedCommunitySize):
-            #    dfactor *= expectedCommunitySize / len(community)
+            if(tgtHeight < -40):
+                tgtHeight = -40
             
             for bID in community:
-                if bID not in riverbeds or riverbeds[bID] < dfactor:
-                    riverbeds[bID] = dfactor
+                if bID not in riverbeds or riverbeds[bID] > tgtHeight:
+                    riverbeds[bID] = tgtHeight if bID in drainMap else snapHeight
 
-        for rID, dfactor in riverbeds.items():
-            rHeight = self._height[rID]
-            rDepth = meanDepth * dfactor
-
-            self._height[rID] -= (rDepth if rHeight >= 0 else
-                                  (40 + rHeight) / 40 * rDepth if rHeight >= -40 else
-                                  0)
+        for rID, tgtHeight in riverbeds.items():
+            self._height[rID] = tgtHeight
 
     def draw_cs_heightmap(self):
         ## Let's write out the cs heightmap
@@ -724,8 +731,8 @@ if __name__ == '__main__':
     ## create base boundaries by creating polygons, generating koch curves, and
     ## using those as fill boundaries.
     
-    # kp = csmap.gen_koch_shore(overlay=2, passage=1)
-    kp = csmap.gen_koch_sink((9000,18000), 750)
+    kp = csmap.gen_koch_shore() # (overlay=2, passage=1)
+    # kp = csmap.gen_koch_sink((9000,18000), 750)
     # kp = csmap.gen_koch_island()
     
     csmap.vp.reset_grid_sel()
@@ -755,11 +762,16 @@ if __name__ == '__main__':
         csmap.quickview(view, fname="out/cs.shore.png", keep=True)
         
     ## Choose a random point within the center 3x3 as a good focus for river generation
-    focusPoint = (csmap.jr.uniform(6000, 12000),
-                   csmap.jr.uniform(6000, 12000))
-    print(f"Focusing rivers toward {focusPoint}")
-    selectWeights = csmap.gen_select_weights(focusPoint)
+    #focusPoint = (csmap.jr.uniform(6000, 12000),
+    #               csmap.jr.uniform(6000, 12000))
+    #print(f"Focusing rivers toward {focusPoint}")
+    #selectWeights = csmap.gen_select_weights(focusPoint)
 
+    ## Choose the four corners of the center sector as a good focus for river generation
+    selectWeights = csmap.gen_select_weights((( 8000,  8000),
+                                              ( 8000, 10000),
+                                              (10000,  8000),
+                                              (10000, 10000)))
     
     for minRiverLength, viewStr, allowedIDs in ((riverSeparation * 4, "major", canRiver),
                                                 (riverSeparation * 2, "minor", None),
@@ -810,18 +822,21 @@ if __name__ == '__main__':
                                   shoreGrade=shoreGrade,
                                   peakGrade=peakGrade,
 
-                                  xFreq=csmap.jr.uniform(0.5 * riverSeparation, 2.0 * riverSeparation),
-                                  xOffset=csmap.jr.uniform(0.0, 2.0*riverSeparation),
+                                  xFreq=csmap.jr.uniform(1.0 * riverSeparation, 5.0 * riverSeparation),
+                                  xOffset=csmap.jr.uniform(0.0, 5.0*riverSeparation),
                                   xScale=vScale,
 
-                                  yFreq=csmap.jr.uniform(0.5 * riverSeparation, 2.0 * riverSeparation),
-                                  yOffset=csmap.jr.uniform(0.0, 2.0*riverSeparation),
+                                  yFreq=csmap.jr.uniform(1.0 * riverSeparation, 5.0 * riverSeparation),
+                                  yOffset=csmap.jr.uniform(0.0, 5.0*riverSeparation),
                                   yScale=1
                                   
                                   );
 
     csmap.gen_heights_really_hard(slopeFn, underwaterMul=max(3.0, shoreGrade/floodPlainGrade))
-    csmap.punch_rivers(drainMap=drains, meanDepth=meanDepth)
+    
+    csmap.punch_rivers(drainMap=drains, width=40, depth=2.5, minDrain=3)
+    csmap.punch_rivers(drainMap=drains, width=20, depth=5, snap=7, minDrain=2)
+    csmap.punch_rivers(drainMap=drains, width=10, depth=10)
 
     print(f"Land runs from {csmap._lowest:.2f}m to {csmap._highest:.2f}m")
 

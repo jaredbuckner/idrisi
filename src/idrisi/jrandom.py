@@ -49,6 +49,29 @@ class JRandom(random.Random):
             yield (self.uniform(pMin[0], pMax[0]),
                    self.uniform(pMin[1], pMax[1]))
 
+    def pinktillate_rect(self, pMin, pMax, distsq):
+        '''Yield random points in the rectangle bounded from pMin to pMax, such that the final number of points are on average math::sqrt(distsq) apart, using red (brownian) noise
+
+        pMin : (xMin, yMin)
+        pMax : (xMax, yMax)
+        '''
+        xdist = pMax[0] - pMin[0]
+        ydist = pMax[1] - pMin[1]
+        point = ((pMin[0] + pMax[0]) / 2.0,
+                 (pMin[1] + pMax[1]) / 2.0)        
+        dist = math.sqrt(distsq)
+        
+        for idx in range(int(xdist * ydist / distsq) + 3):
+            while True:
+                newPoint = (point[0] + self.uniform(-dist * 2.0, dist * 2.0),
+                            point[1] + self.uniform(-dist * 2.0, dist * 2.0))
+                if((pMin[0] <= newPoint[0] <= pMax[0]) and
+                   (pMin[1] <= newPoint[1] <= pMax[1])):
+                    point = newPoint
+                    yield point
+                    break
+        
+
     def tonal_rand(self, rMin, rMax, overtones, *,
                    tiltangle=None, tiltspread=math.pi/3, istilttoward=True):
         '''Create (base, evenAmplSeq, oddAmplSeq) based on:

@@ -2,6 +2,7 @@
 
 import math
 
+
 def in_radial_fn(pCenter, base, evenAmplSeq, oddAmplSeq):
     '''Create a function that takes a point and returns true if the point is within
     its boundary, false otherwise.  The boundary is defined radially from
@@ -28,6 +29,7 @@ def in_radial_fn(pCenter, base, evenAmplSeq, oddAmplSeq):
 
 def make_linear_interp(a, b):
     span = a - b
+    if span == 0: raise ValueError('Interp values cannot be the same')
 
     def _linterp(v):
         aW = (v-b)/span
@@ -52,6 +54,7 @@ def make_grid_interp(minPoint, maxPoint):
     ## Weights are: (0,0, aW)  (1,0, bW)
     ##              (0,1, cW)  (1,1, dW)
     det = (maxPoint[0]-minPoint[0], maxPoint[1]-minPoint[1])
+    if det[0] == 0 or det[1] == 0: raise ValueError('Interp points cannot be gridwise coincidental')
 
     def _ginterp(vPoint):
         xW = (vPoint[0] - minPoint[0]) / det[0]
@@ -65,7 +68,10 @@ def make_grid_interp(minPoint, maxPoint):
 
 
 def make_array_interp(tgtArraySize, minVal, maxVal):
-    factor = (tgtArraySize - 1) / (maxVal - minVal)
+    span = maxVal - minVal
+    if span == 0: raise ValueError('Interp values must be different')
+
+    factor = (tgtArraySize - 1) / span
     
     def _ainterp(val):
         pointer = (val - minVal) * factor
@@ -90,6 +96,9 @@ def invl_sum(a, b):
            None if a[1] is None or b[1] is None else a[1] + b[1])
 
 def invl_scale(a, factor):
+    # A negative scaling factor can create an invalid interval.  It is highly
+    # advised to check afterward with invl_valid()
+
     return(None if a[0] is None else a[0] * factor,
            None if a[1] is None else a[1] * factor)
 
@@ -105,20 +114,15 @@ def invl_closed(a):
 
 
 class Viewport():
-    '''Class objects maintain a relationship between the map grid dimensions and a
-    view of that grid.
-    
-    gridSize:    The map is defined as spanning the region between 0,0 and
-                 gridSize, inclusive.  Map points may exist beyond this grid.
-    
-    gridSelMin:  The lower-left corner of the map selection
-    gridSelMax:  The upper-right corner of the map selection
-    
-    viewSize:    The view is defined as spanning the region between 0,0 and
-                 viewSize, endpoint-exclusive.  That is, view 0,0 maps to
-                 gridSelMin, and view viewSize[0]-1,viewSize[1]-1 maps to
-                 gridSelMax
-    '''
+    '''Maintains mappings between a logical grid and a selected sub-rectangle
+    of that grid to a view (e.g., pixel coordinates). The grid spans (0,0) to
+    gridSize inclusive; map data may exist outside this box. A grid selection
+    (gridSelMin, gridSelMax) defines the current visible region and defaults
+    to the whole grid. The view spans (0,0) to viewSize with exclusive ends,
+    so (0,0) maps to gridSelMin and (viewSize[0]-1, viewSize[1]-1) maps to
+    gridSelMax. Conversion helpers accept/return bilinear weights
+    (aW,bW,cW,dW) ordered as (top-left, top-right, bottom-left, bottom-right)
+    and weights always sum to 1.'''
     
     def __init__(self, gridSize, viewSize):
         self._gridSize = tuple(gridSize)
@@ -128,28 +132,35 @@ class Viewport():
         self.reset_grid_sel()
         
     def grid_size(self):
+        '''Return the full grid dimensions as (width, height).'''
         return self._gridSize
 
     def grid2weights(self, vPoint):
+        '''Bilinear weights for a grid point relative to the full grid.'''
         return self._gridInterp(vPoint)
 
     def weights2grid(self, aW, bW, cW, dW):
+        '''Convert full-grid weights back to a grid point.'''
         return((bW+dW) * self._gridSize[0],
                (cW+dW) * self._gridSize[1])
     
     def grid_sel_size(self):
-        return (self._gridSelMin, self._gridSelmax)
+        return (self._gridSelMin, self._gridSelMax)
     
     def grid_sel_min(self):
+        '''Lower-left corner of the current grid selection.'''
         return self._gridSelMin
 
     def grid_sel_max(self):
+        '''Upper-right corner of the current grid selection.'''
         return self._gridSelMax
 
     def grid_sel2weights(self, vPoint):
+        '''Bilinear weights for a grid point relative to the selection.'''
         return self._gridSelInterp(vPoint)
 
     def weights2grid_sel(self, aW, bW, cW, dW):
+        '''Convert selection-relative weights to a grid point.'''
         return((aW+cW) * self._gridSelMin[0] + (bW+dW) * self._gridSelMax[0],
                (aW+bW) * self._gridSelMin[1] + (cW+dW) * self._gridSelMax[1])
     
@@ -159,15 +170,12 @@ class Viewport():
         self._gridSelInterp = make_grid_interp(self._gridSelMin, self._gridSelMax)
 
     def reset_grid_sel(self):
+        '''Reset selection to the full grid.'''
         self.set_grid_sel(gridSelMin=(0.0, 0.0),
                           gridSelMax=self._gridSize)
 
     def zoom_grid_sel(self, factor, *, center=None):
-        '''Zoom (resize) the grid selection.
-        
-        Factor is the amount of zoom.  If center is given, grid zoom is
-        centered on the given point, otherwise on the center point.
-        '''
+        '''Zoom selection by factor around center (default: selection center).'''
         if center is None:
             center = ((self._gridSelMax[0] + self._gridSelMin[0]) / 2.0,
                       (self._gridSelMax[1] + self._gridSelMin[1]) / 2.0)
@@ -181,8 +189,7 @@ class Viewport():
                            self._gridSelMax[1] * selW + center[1] * cenW))
     
     def recenter_grid_sel(self, center):
-        '''Recenter the grid selection
-        '''
+        '''Recenter selection to a new center point without scaling.'''
         fiff = ((self._gridSelMax[0] - self._gridSelMin[0]) / 2.0,
                 (self._gridSelMax[1] - self._gridSelMin[1]) / 2.0)
 
@@ -190,10 +197,7 @@ class Viewport():
                           (center[0] + fiff[0], center[1] + fiff[1]))
 
     def reaspect_grid_sel(self, ratio=None):
-        '''Resize the grid selection to the given aspect ratio (height/width).
-        
-        If no ratio is given, use the view ratio.
-        '''
+        '''Resize selection to ratio (h/w), defaulting to the view ratio.'''
         if ratio is None:
             ratio = self._viewSize[1] / self._viewSize[0]
 
@@ -212,24 +216,30 @@ class Viewport():
                               (xCenter+xHSpan, yCenter+yHSpanNew))
         
     def view_size(self):
+        '''Return the view dimensions as (width, height).'''
         return self._viewSize
 
     def view2weights(self, vXY):
+        '''Bilinear weights for a view point relative to the view.'''
         return(self._viewInterp(vXY))
 
     def weights2view(self, aW, bW, cW, dW):
+        '''Convert view-relative weights to a view point.'''
         return ((bW+dW) * self._viewSize[0],
                 (cW+dW) * self._viewSize[1])
     
     def set_view_size(self, viewSize):
+        '''Update view dimensions and refresh its interpolator.'''
         self._viewSize = tuple(viewSize)
         self._viewInterp = make_grid_interp((0,0), self._viewSize)
     
     def grid2view(self, point):
+        '''Map a grid point in the selection to view coordinates.'''
         aW, bW, cW, dW = self.grid_sel2weights(point)
         return self.weights2view(aW, bW, cW, dW)
 
     def view2grid(self, xy):
+        '''Map a view point to the corresponding grid point in selection.'''
         aW, bW, cW, dW = self.view2weights(xy)
         return self.weights2grid_sel(aW, bW, cW, dW)
     
