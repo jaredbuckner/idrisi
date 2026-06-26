@@ -1,6 +1,6 @@
 # Idrisi
 
-Idrisi is a Python terrain generator that builds game-ready heightmaps. It combines Delaunay-based meshing, river-aware levelization, and slope-constrained height solving to export 1081×1081 greyscale maps tuned for Cities: Skylines, along with intermediate visualizations you can inspect or tweak.
+Idrisi is a terrain generator that builds game-ready heightmaps. The current implementation is Python; a C++ implementation will live alongside it as the project evolves. It combines Delaunay-based meshing, river-aware levelization, and slope-constrained height solving to export 1081×1081 greyscale maps tuned for Cities: Skylines, along with intermediate visualizations you can inspect or tweak.
 
 ## Highlights
 - Delaunay grid seeded by Poisson-disc sampling to avoid clustered artifacts.
@@ -13,9 +13,9 @@ Idrisi is a Python terrain generator that builds game-ready heightmaps. It combi
 ## Quick start
 ```bash
 pip install scipy pillow tqdm
-export PYTHONPATH=src
+export PYTHONPATH=python/src
 python -m idrisi.cs --help      # see all knobs
-./makemap.sh                    # generate a default Cities: Skylines map
+./python/scripts/makemap.sh     # generate a default Cities: Skylines map
 ```
 
 Outputs land in `out/`:
@@ -33,7 +33,14 @@ Outputs land in `out/`:
 - `--flood_plain_width/grade`, `--foothill_*`, `--midhill_*`, `--shoulder_*`, `--peak_grade`: gradient envelope for climbing away from rivers toward peaks.
 - `--variance_scale`: scales X/Y variation to break up large flat areas.
 
-Adjust any combination in `./makemap.sh` or call `python -m idrisi.cs` with your own values; ranges can be passed as `min:max` to let Idrisi pick randomized variations per run.
+Adjust any combination in `./python/scripts/makemap.sh` or call `python -m idrisi.cs` with your own values; ranges can be passed as `min:max` to let Idrisi pick randomized variations per run.
+
+## Repository layout
+- `python/`: the Python reference implementation and its scripts.
+- `cpp/`: the future C++ implementation, with CMake build files.
+- `tools/`: cross-language helpers, comparisons, and generation scripts.
+- `examples/`: usage examples and game-specific presets.
+- `out/`, `save/`: generated maps and local archives, ignored by Git.
 
 ## How it works
 - **Grid + mesh**: sample points in world space, triangulate with SciPy Delaunay, and forbid long edges to keep the mesh well-behaved.
@@ -44,6 +51,6 @@ Adjust any combination in `./makemap.sh` or call `python -m idrisi.cs` with your
 - **Export**: color previews for inspection plus a Cities: Skylines-ready greyscale PNG.
 
 ## Importing into Cities: Skylines
-1. Run `./makemap.sh` (or your tuned command) and grab `out/cs.heightmap.png`.
+1. Run `./python/scripts/makemap.sh` (or your tuned command) and grab `out/cs.heightmap.png`.
 2. In the Cities: Skylines map editor, import the PNG as a heightmap (1081×1081).
 3. Tweak water level and detailing in-game; the generator already respects an 18 km play area with extra padding.

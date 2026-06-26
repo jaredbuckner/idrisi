@@ -1,6 +1,12 @@
 #!/bin/bash
 
-export PYTHONPATH=src
+set -euo pipefail
+
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+REPO_ROOT="$(cd "${SCRIPT_DIR}/../.." && pwd)"
+
+export PYTHONPATH="${REPO_ROOT}/python/src"
+cd "${REPO_ROOT}"
 
 python -midrisi.cs \
        --separate 29 \

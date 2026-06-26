@@ -1,0 +1,18 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "idrisi"
+version = "0.1.0"
+description = "Delaunay-based terrain and heightmap generator"
+readme = "README.md"
+requires-python = ">=3.9"
+dependencies = [
+    "pillow",
+    "scipy",
+    "tqdm",
+]
+
+[tool.setuptools.packages.find]
+where = ["src"]

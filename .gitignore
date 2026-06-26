@@ -1,5 +1,21 @@
-__pycache__
+# Python
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.venv/
+venv/
+
+# Build outputs
+build/
+cmake-build-*/
+CMakeFiles/
+CMakeCache.txt
+compile_commands.json
+cpp/build/
+
+# Generated map outputs and local archives
 out/
+save/
 cs_heighmaps
-save
-makespecial.sh
